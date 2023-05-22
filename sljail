@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+
+set -e
+
+: "${XDG_RUNTIME_DIR:="/run/user/$(id -u)"}"
+: "${XDG_DATA_HOME:="${HOME}/.local/share"}"
+: "${XDG_STATE_HOME:="${HOME}/.local/state"}"
+
+: "${SANDBOX_STATE_HOME:="${XDG_STATE_HOME}/sandbox"}"
+INSTANCE_HOME="${SANDBOX_STATE_HOME}/${SANDBOX_INSTANCE_NAME}"
+
+arg() {
+  _arg="${1}"
+  shift
+  args+=("--${_arg}" ${@})
+}
+
+# Repeat the arg with all the other args - for binds
+# example:
+#   arg2 ro-bind-try '/usr'            # bind '/usr' to '/usr'
+#   arg2 dev-bind-try '/dev/nvidia'*   # bind all /dev/nvidia* devices
+arg2() {
+  _bind_arg="${1}"
+	shift
+	for _path in "${@}"; do
+		arg "${_bind_arg}" "${_path}" "${_path}"
+	done
+}
+
+# Change username and home directory inside of sandbox 
+user() {
+  arg setenv 'HOME' "/home/${1}"
+  arg chdir "/home/${1}"
+}
+
+machine-id() {
+  exec {fd}< <(tr -dc '[:digit:]abcdef' < '/dev/urandom' | head -c 32)
+  arg file "${fd}" '/etc/machine-id'
+}
+
+# initialize args array
+args=()
+
+###############################################################################
+
+# user 'user'
+#
+# arg dir "/home/${SANDBOX_INSTANCE_NAME}"
+# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.config"
+# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.cache"
+# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.local/share"
+# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.local/state"
+#
+# arg symlink '/usr/lib' '/lib'
+# arg symlink '/usr/lib' '/lib64'
+# arg symlink '/usr/bin' '/bin'
+# arg symlink '/usr/bin' '/sbin'
+# arg symlink '/run' '/var/run'
+#
+# arg tmpfs '/tmp'
+# arg proc '/proc'
+# arg dev '/dev'
+# arg dir '/etc'
+# arg dir '/var'
+# arg dir "$XDG_RUNTIME_DIR"
+# arg bind "$STEAM_HOME" "$HOME"
+#
+# arg2 ro-bind-try '/usr'
+# arg2 ro-bind-try '/etc'
+# arg2 ro-bind-try '/opt'
+# arg2 ro-bind-try '/sys'
+# arg2 ro-bind-try '/var/empty'
+# arg2 ro-bind-try '/var/lib/alsa'
+# arg2 ro-bind-try '/var/lib/dbus'
+# arg2 ro-bind-try "${XDG_RUNTIME_DIR}/systemd/resolve"
+#
+# arg2 dev-bind-try '/dev/dri' 
+# arg2 dev-bind-try '/dev/nvidia'*
+#
+# # steam
+# arg bind-try "$HOME/.Xauthority" 
+# arg bind-try "$HOME/.local/bin/proton" 
+# arg bind-try "$HOME/.pki" 
+# arg bind-try "$HOME/.steam" 
+# arg bind-try "$HOME/.steampath" 
+# arg bind-try "$HOME/.steampid" 
+# arg bind-try "$HOME/Downloads" 
+# arg bind-try "$XDG_RUNTIME_DIR/.mutter-X"* 
+# arg bind-try "$XDG_RUNTIME_DIR/ICE"* 
+# arg bind-try "$XDG_RUNTIME_DIR/dbus"* 
+# arg bind-try "$XDG_RUNTIME_DIR/gnome"* 
+# arg bind-try "$XDG_RUNTIME_DIR/pipewire"* 
+# arg bind-try "$XDG_RUNTIME_DIR/pulse"* 
+# arg bind-try "$XDG_RUNTIME_DIR/wayland"* 
+# arg bind-try "$XDG_RUNTIME_DIR/at-spi" 
+# arg bind-try "$XDG_RUNTIME_DIR/bus" 
+# arg bind-try "$XDG_RUNTIME_DIR/dconf" 
+# arg bind-try "$XDG_RUNTIME_DIR/systemd" 
+# arg bind-try "$XDG_CACHE_HOME/mesa_shader_cache" 
+# arg bind-try "$XDG_CACHE_HOME/nv" 
+# arg bind-try "$XDG_CACHE_HOME/nvidia" 
+# arg bind-try "$XDG_CACHE_HOME/radv_builtin_shaders64" 
+# arg bind-try "$XDG_CONFIG_HOME/Epic" 
+# arg bind-try "$XDG_CONFIG_HOME/Loop_Hero" 
+# arg bind-try "$XDG_CONFIG_HOME/MangoHud" 
+# arg bind-try "$XDG_CONFIG_HOME/ModTheSpire" 
+# arg bind-try "$XDG_CONFIG_HOME/RogueLegacy" 
+# arg bind-try "$XDG_CONFIG_HOME/RogueLegacyStorageContainer" 
+# arg bind-try "$XDG_CONFIG_HOME/cef_user_data" 
+# arg bind-try "$XDG_CONFIG_HOME/proton" 
+# arg bind-try "$XDG_CONFIG_HOME/pulse" 
+# arg bind-try "$XDG_CONFIG_HOME/unity3d" 
+# arg bind-try "$XDG_DATA_HOME/3909/PapersPlease" 
+# arg bind-try "$XDG_DATA_HOME/Colossal Order" 
+# arg bind-try "$XDG_DATA_HOME/Dredmor" 
+# arg bind-try "$XDG_DATA_HOME/FasterThanLight" 
+# arg bind-try "$XDG_DATA_HOME/HotlineMiami" 
+# arg bind-try "$XDG_DATA_HOME/IntoTheBreach" 
+# arg bind-try "$XDG_DATA_HOME/Paradox Interactive" 
+# arg bind-try "$XDG_DATA_HOME/PillarsOfEternity" 
+# arg bind-try "$XDG_DATA_HOME/RogueLegacy" 
+# arg bind-try "$XDG_DATA_HOME/RogueLegacyStorageContainer" 
+# arg bind-try "$XDG_DATA_HOME/Steam" 
+# arg bind-try "$XDG_DATA_HOME/SuperHexagon" 
+# arg bind-try "$XDG_DATA_HOME/Terraria" 
+# arg bind-try "$XDG_DATA_HOME/applications" 
+# arg bind-try "$XDG_DATA_HOME/aspyr-media" 
+# arg bind-try "$XDG_DATA_HOME/bohemiainteractive" 
+# arg bind-try "$XDG_DATA_HOME/cdprojektred" 
+# arg bind-try "$XDG_DATA_HOME/feral-interactive" 
+# arg bind-try "$XDG_DATA_HOME/frictionalgames" 
+# arg bind-try "$XDG_DATA_HOME/icons" 
+# arg bind-try "$XDG_DATA_HOME/proton" 
+# arg bind-try "$XDG_DATA_HOME/vpltd" 
+# arg bind-try "$XDG_DATA_HOME/vulkan" 
+# arg bind-try "/var/lib/bluetooth" 
+# arg bind-try '/run/systemd' 
+# arg bind-try '/tmp/.ICE-unix' 
+# arg bind-try '/tmp/.X11-unix'
+
+################################################################################
+
+arg unshare-all
+arg die-with-parent
+arg as-pid-1 
+arg new-session 
+arg uid 1000 
+arg gid 1000 
+arg proc '/proc' 
+arg dev '/dev' 
+arg clearenv 
+
+arg2 ro-bind '/usr'
+arg2 ro-bind '/opt'
+
+arg symlink '/usr/lib' '/lib' 
+arg symlink '/usr/bin' '/bin' 
+arg symlink '/usr/lib' '/lib64' 
+arg symlink '/usr/bin' '/sbin' 
+
+arg2 ro-bind '/etc/login.defs'
+arg2 ro-bind-try '/etc/ld.so.cache'
+arg2 ro-bind-try '/etc/ld.so.conf'
+arg2 ro-bind-try '/etc/ld.so.conf.d'
+
+arg dir /tmp 
+arg dir /var 
+arg perms 700 
+arg dir /run/user/1000 
+arg dir /usr/local 
+
+arg bind '/home/nrv/.local/share/bubblejail/instances/steam-nrv/home' '/home/user' 
+arg setenv 'USER' 'user' 
+arg setenv 'USERNAME' 'user' 
+arg setenv 'HOME' '/home/user' 
+arg setenv 'PATH' '/usr/local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/usr/lib/plan9/bin' 
+arg setenv 'XDG_RUNTIME_DIR' '/run/user/1000' 
+arg setenv 'LANG' 'en_US.UTF-8' 
+arg file 6 '/etc/passwd' 
+arg file 7 '/etc/group' 
+arg file 8 '/etc/nsswitch.conf' 
+arg file 9 '/etc/host.conf' 
+arg file 10 '/etc/hostname' 
+arg file 11 '/etc/hosts' 
+arg file 12 '/etc/machine-id' 
+arg ro-bind '/etc/localtime' '/etc/localtime' 
+arg setenv 'XDG_SESSION_TYPE' 'X11' 
+arg setenv 'XDG_CURRENT_DESKTOP' 'gnome' 
+arg setenv 'DISPLAY' ':0' 
+arg bind '/tmp/.X11-unix/X0' '/tmp/.X11-unix/X0' 
+arg ro-bind '/home/nrv/.Xauthority' '/tmp/.Xauthority' 
+arg ro-bind '/etc/fonts' '/etc/fonts' 
+arg setenv 'XAUTHORITY' '/tmp/.Xauthority' 
+arg share-net 
+arg2 ro-bind '/etc/resolv.conf'
+arg2 ro-bind '/etc/ca-certificates'
+arg2 ro-bind '/etc/ssl'
+arg2 bind '/run/user/1000/pulse/native'
+arg2 bind '/home/nrv/.local/share/Steam'
+arg2 bind '/home/nrv/.config/vkBasalt/vkBasalt.conf'
+arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/card0' '/sys/dev/char/226:0' 
+arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
+arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/renderD128' '/sys/dev/char/226:128' 
+arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
+arg dev-bind '/dev/dri' '/dev/dri' 
+arg2 bind '/srv/steam_d'
+arg2 ro-bind '/sys/devices/system/cpu'
+arg seccomp 13 
+arg setenv 'DBUS_SESSION_BUS_ADDRESS' 'unix:path=/run/user/1000/bus' 
+arg2 bind '/run/user/1000/bubblejail/steam-nrv/dbus_session_proxy' '/run/user/1000/bus' 
+arg2 bind '/run/user/1000/bubblejail/steam-nrv/dbus_system_proxy' '/var/run/dbus/system_bus_socket' 
+arg2 bind '/run/user/1000/bubblejail/steam-nrv/dbus_system_proxy' '/run/dbus/system_bus_socket' 
+arg2 bind '/run/user/1000/bubblejail/steam-nrv/helper' '/run/bubblehelp' 
+arg2 chdir '/home/user'
+
+# Bwrap args:
+# /usr/bin/bwrap --args 16 /usr/lib/bubblejail/bubblejail-helper /usr/bin/steam
+# Dbus session args
+#xdg-dbus-proxy \
+#  unix:path="/run/user/1000/bus" \
+#  "/run/user/1000/bubblejail/steam-nrv/dbus_session_proxy" \
+#  --fd=15 \
+#  --filter unix:path="/run/dbus/system_bus_socket"
+#  "/run/user/1000/bubblejail/steam-nrv/dbus_system_proxy" \
+#  --filter
+
+################################################################################
+
+echo "${args[@]}" "${1}" "$@" | sed 's/--/\n--/g'
