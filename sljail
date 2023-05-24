@@ -1,26 +1,31 @@
 #!/usr/bin/env bash
 # shellcheck disable=2016,2155
 
-set -ue
+set -u
 
-SLJAIL_SELF_NAME="$(basename "${0}")"
-
+# host environment
 : "${XDG_RUNTIME_DIR:="/run/user/$(id -u)"}"
 : "${XDG_DATA_HOME:="${HOME}/.local/share"}"
 : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
 : "${XDG_CACHE_HOME:="${HOME}/.cache"}"
 : "${XDG_CONFIG_HOME:="${HOME}/.config"}"
+: "${DBUS_SESSION_BUS_ADDRESS:="unix:path=${XDG_RUNTIME_DIR}/bus"}"
 
+# sljail common environment
+SLJAIL_SELF_NAME="$(basename "${0}")"
 : "${SLJAIL_STATE_HOME:="${XDG_STATE_HOME}/sljail"}"
 : "${SLJAIL_RUNTIME_DIR:="${XDG_RUNTIME_DIR}/sljail"}"
 : "${SLJAIL_CACHE_HOME:="${XDG_CACHE_HOME}/sljail"}"
 SLJAIL_GCC_ARGS=(-Wall -Wextra -lseccomp)
 
+# sljail instance environment
 SLJAIL_INSTANCE_NAME=
 SLJAIL_INSTANCE_HOME=
 SLJAIL_INSTANCE_USER_HOME=
 SLJAIL_INSTANCE_RUNTIME_DIR=
 
+# would-be environment inside the sandbox 
+# (the normal names but prefixed with 'SANDBOX_')
 SANDBOX_USER="${USER}"
 SANDBOX_UID=1000
 SANDBOX_GID=1000
@@ -31,6 +36,7 @@ SANDBOX_XDG_DATA_HOME="${SANDBOX_HOME}/.local/share"
 SANDBOX_XDG_STATE_HOME="${SANDBOX_HOME}/.local/state"
 SANDBOX_XDG_CACHE_HOME="${SANDBOX_HOME}/.cache"
 SANDBOX_XDG_CONFIG_HOME="${SANDBOX_HOME}/.config"
+SANDBOX_DBUS_SESSION_BUS_ADDRESS="${SANDBOX_XDG_RUNTIME_DIR}/bus"
 
 say() {
 	printf '%s: %s\n' "${SLJAIL_SELF_NAME}" "${1}" >&2
@@ -185,9 +191,9 @@ dbus-system() {
 
 dbus-user() {
   enable_dbus_user=true
-  arg setenv 'DBUS_SESSION_BUS_ADDRESS' "unix:path=${SANDBOX_XDG_RUNTIME_DIR}/bus" 
+  arg setenv 'DBUS_SESSION_BUS_ADDRESS' "${DBUS_SESSION_BUS_ADDRESS}" 
   # FIXME: hardcoded dbus path
-  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_XDG_RUNTIME_DIR}/bus" 
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_DBUS_SESSION_BUS_ADDRESS}" 
 }
 
 # use precompiled bpf file as a seccomp-bpf filter of the sandbox
@@ -279,41 +285,50 @@ source "${profile}"
 [ -z "${1-}" ] && say 'ERROR: `COMMAND` is required' && usage && exit 1
 program="${1}" && shift
 
-# setup args for xdg dbus proxy
-# FIXME: a dummy fd. dont really know how to use it. tried to read it below to
-# wait for proxies to start or something, didn't work, but haven't caused any
-# problems either.
-exec {xdg_dbus_proxy_fd}<>"$(mktemp)"
-xdg_dbus_proxy_args=(
-  --fd="${xdg_dbus_proxy_fd}"
-)
-[ "${enable_dbus_system}" = true ] && xdg_dbus_proxy_args+=(
-  unix:path="/run/dbus/system_bus_socket"
-  "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
-  --filter "${dbus_system_args[@]}"
-  --log
-)
-[ "${enable_dbus_user}" = true ] && xdg_dbus_proxy_args+=(
-  unix:path="${XDG_RUNTIME_DIR}/bus"
-  "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
-  --filter "${dbus_user_args[@]}"
-  --log
-)
-
 # start xdg dbus proxy
 if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system}" = true ] || [ "${enable_dbus_user}" = true ]; }; then
+  # setup args for xdg dbus proxy
+  pipe="$(mktemp -u)"
+  mkfifo "${pipe}"
+  exec {xdg_dbus_proxy_fd}<>"${pipe}"
+  rm "${pipe}"
+  xdg_dbus_proxy_args=(
+    --fd="${xdg_dbus_proxy_fd}"
+  )
+  [ "${enable_dbus_system}" = true ] && xdg_dbus_proxy_args+=(
+    'unix:path=/run/dbus/system_bus_socket'
+    "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
+    --filter "${dbus_system_args[@]}"
+    --log
+  )
+  [ "${enable_dbus_user}" = true ] && xdg_dbus_proxy_args+=(
+    "${DBUS_SESSION_BUS_ADDRESS}"
+    "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
+    --filter "${dbus_user_args[@]}"
+    --log
+  )
+
   mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}"
   xdg-dbus-proxy "${xdg_dbus_proxy_args[@]}" &
   xdg_dbus_proxy_pid="${!}"
   # shellcheck disable=2064
   trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
+
+  # wait for proxies
+  #sleep 3
+  read -N 1 -r -u "${xdg_dbus_proxy_fd}" _byte
+  [ -n "${DEBUG-}" ] && {
+    say "xdg-dbus-proxy fd = ${xdg_dbus_proxy_fd}"
+    say "xdg-dbus-proxy args = ${xdg_dbus_proxy_args[*]}"
+    say "xdg-dbus-proxy byte = ${_byte}"
+  }
 fi
 
-# wait for proxies
-cat <&"${xdg_dbus_proxy_fd}"
-
-# execute bwrap with the arguments
+# execute bwrap with the arguments or print arguments if DEBUG
 if [ -z "${DEBUG-}" ]; then 
+  # DANGER: rm -rf of dynamic value. nothing bad happens, right?
+  # shellcheck disable=2064
+  trap "rm -rf '${SLJAIL_INSTANCE_RUNTIME_DIR}'" EXIT TERM HUP
   bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
 else
   # shellcheck disable=2001

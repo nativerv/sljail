@@ -14,7 +14,7 @@ arg2 ro-bind '/opt'
 arg symlink '/usr/lib' '/lib' 
 arg symlink '/usr/bin' '/bin' 
 arg symlink '/usr/lib' '/lib64' 
-arg symlink '/usr/bin' '/sbin' 
+arg symlink '/usr/bin' '/sbin'
 
 arg2 ro-bind '/etc/login.defs'
 arg2 ro-bind-try '/etc/ld.so.cache'
