@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=2016,2155
 
 set -ue
 
@@ -12,6 +13,8 @@ SLJAIL_SELF_NAME="$(basename "${0}")"
 
 : "${SLJAIL_STATE_HOME:="${XDG_STATE_HOME}/sljail"}"
 : "${SLJAIL_RUNTIME_DIR:="${XDG_RUNTIME_DIR}/sljail"}"
+: "${SLJAIL_CACHE_HOME:="${XDG_CACHE_HOME}/sljail"}"
+SLJAIL_GCC_ARGS=(-Wall -Wextra -lseccomp)
 
 SLJAIL_INSTANCE_NAME=
 SLJAIL_INSTANCE_HOME=
@@ -37,6 +40,11 @@ next_fd() {
   { seq 0 255; ls -1 "/proc/${$}/fd"; } | sort -n | uniq -u | head -1
 }
 
+# alloc_fd() {
+#   exec {fd}<"${1}"
+#   printf '%d' "${fd}"
+# }
+
 # add bubblewrap argument
 # example:
 #   arg symlink '/usr/lib' '/lib'      # symlink '/usr/lib' to '/lib' inside the sandbox
@@ -44,6 +52,7 @@ next_fd() {
 arg() {
   local arg_name="${1}"
   shift
+  # shellcheck disable=2206
   bwrap_args+=("--${arg_name}" ${@})
 }
 
@@ -60,6 +69,7 @@ arg2() {
 }
 
 # change username and home directory inside of the sandbox 
+# shellcheck disable=2034
 user() {
   SANDBOX_USER="${1}"
   SANDBOX_HOME="/home/${SANDBOX_USER}"
@@ -84,9 +94,9 @@ machine-id() {
 # spoof /etc/passwd file
 passwd() {
   local passwd="$(cat <<EOF
-  root:x:0:0::/root:/bin/bash
-  ${SANDBOX_USER}:x:${SANDBOX_UID}:${SANDBOX_GID}::${SANDBOX_HOME}:/bin/sh
-  nobody:x:65534:65534:Nobody:/:/usr/bin/nologin
+root:x:0:0::/root:/bin/bash
+${SANDBOX_USER}:x:${SANDBOX_UID}:${SANDBOX_GID}::${SANDBOX_HOME}:/bin/sh
+nobody:x:65534:65534:Nobody:/:/usr/bin/nologin
 EOF
   )"
   exec {fd}< <(printf '%s' "${passwd}")
@@ -96,9 +106,9 @@ EOF
 # spoof /etc/group file
 group() {
   local group="$(cat <<EOF
-    root:x:0:root
-    ${SANDBOX_USER}:x:${SANDBOX_GID}:${SANDBOX_USER}
-    nobody:x:65534:
+root:x:0:root
+${SANDBOX_USER}:x:${SANDBOX_GID}:${SANDBOX_USER}
+nobody:x:65534:
 EOF
   )"
   exec {fd}< <(printf '%s' "${group}")
@@ -125,9 +135,9 @@ hostname() {
 # spoof /etc/hosts file
 hosts() {
   local hosts="$(cat <<EOF
-    127.0.0.1	localhost
-    ::1		localhost
-    127.0.0.1	${SANDBOX_HOSTNAME}.localdomain	${SANDBOX_HOSTNAME}
+127.0.0.1	localhost
+::1		localhost
+127.0.0.1	${SANDBOX_HOSTNAME}.localdomain	${SANDBOX_HOSTNAME}
 EOF
   )"
   exec {fd}< <(printf '%s' "${hosts}")
@@ -137,7 +147,7 @@ EOF
 # spoof /etc/host.conf file
 host.conf() {
   local host_conf="$(cat <<EOF
-  multi on
+multi on
 EOF
   )"
   exec {fd}< <(printf '%s' "${host_conf}")
@@ -146,21 +156,21 @@ EOF
 
 nsswitch.conf() {
   local nsswitch_conf="$(cat <<EOF
-    passwd: files
-    group: files
-    shadow: files
+passwd: files
+group: files
+shadow: files
 
-    publickey: files
+publickey: files
 
-    hosts: files myhostname dns
-    networks: files
+hosts: files myhostname dns
+networks: files
 
-    protocols: files
-    services: files
-    ethers: files
-    rpc: files
+protocols: files
+services: files
+ethers: files
+rpc: files
 
-    netgroup: files
+netgroup: files
 EOF
   )"
   exec {fd}< <(printf '%s' "${nsswitch_conf}")
@@ -179,11 +189,29 @@ dbus-user() {
   arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" '/run/user/1000/bus' 
 }
 
-seccomp() {
+# use precompiled bpf file as a seccomp-bpf filter of the sandbox
+seccomp-precompiled() {
   exec {fd}<"${1}"
   arg seccomp "${fd}"
 }
 
+# use a C source file that exports seccomp-bpf filter to stdout as a
+# seccomp-bpf filter of the sandbox
+seccomp() {
+  local seccomp_profile="${1}" # /home/pr/sljail/seccomp/default.c
+  local seccomp_profile_name="$(basename "${seccomp_profile}")" # default.c
+  local seccomp_profile_name="${seccomp_profile_name%.c}" # default
+  local binary="${SLJAIL_CACHE_HOME}/seccomp/$(sha256sum "${seccomp_profile}" | cut -d' ' -f1)-${seccomp_profile_name}" # /home/.cache/sljail/seccomp/aabbccddeeff001122334455-default
+  if ! [ -f "${binary}" ]; then
+    mkdir -p "$(dirname "${binary}")"
+    gcc "${SLJAIL_GCC_ARGS[@]}" -o "${binary}" "${seccomp_profile}"
+    "${binary}" > "${binary}.bpf"
+  fi
+  exec {fd}<"${binary}.bpf"
+  arg seccomp "${fd}"
+}
+
+# shellcheck disable=2034
 name() {
   SLJAIL_INSTANCE_NAME="${1}"
   SLJAIL_INSTANCE_HOME="${SLJAIL_STATE_HOME}/${SLJAIL_INSTANCE_NAME}"
@@ -228,8 +256,8 @@ while :; do
 done
 
 # validate arguments
-[ -z "${profile}" ] && say 'ERROR: --profile is required.' && exit 1
-[ -z "${SLJAIL_INSTANCE_NAME}" ] && say 'ERROR: sljail instance is required to have a name. Either pass it through the --name argument, or specify it in the profile.' && exit 1
+[ -z "${profile}" ] && say 'ERROR: `--profile` is required.' && exit 1
+[ -z "${SLJAIL_INSTANCE_NAME}" ] && say 'ERROR: sljail instance is required to have a name. Either pass it through the `--name` argument, or specify it in the profile with the `name` command.' && exit 1
 
 # initialize args arrays
 bwrap_args=()
@@ -248,8 +276,11 @@ source "${profile}"
 program="${1}" && shift
 
 # setup args for xdg dbus proxy
-exec {fd}<>"$(mktemp)"
-xdg_dbus_proxy_args=(--fd="${fd}")
+# FIXME: a dummy fd. dont really know how to use it. tried to read it below to
+# wait for proxies to start or something, didn't work, but haven't caused any
+# problems either.
+exec {xdg_dbus_proxy_fd}<>"$(mktemp)"
+xdg_dbus_proxy_args=(--fd="${xdg_dbus_proxy_fd}")
 [ "${enable_dbus_system}" = true ] && mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}" && xdg_dbus_proxy_args+=(
   unix:path="/run/dbus/system_bus_socket"
   "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
@@ -268,17 +299,16 @@ if [ "${enable_dbus_system}" = true ] || [ "${enable_dbus_user}" = true ]; then
 fi
 
 # wait for proxies
-# read _ <&"${fd}"
-# printf 'after\n'
+# read _ <&"${xdg_dbus_proxy_fd}"
 
-sleep 3
-
+# shellcheck disable=2064
 trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
 
 # execute bwrap with the arguments
 if [ -z "${DEBUG-}" ]; then 
   bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
 else
+  # shellcheck disable=2001
   echo "${bwrap_args[@]}" | sed 's/--/\n--/g'
   echo "${program}" "${@}"
 fi

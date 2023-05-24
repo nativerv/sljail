@@ -1,3 +1,5 @@
+# name 'ls'
+
 arg unshare-all
 arg die-with-parent
 arg as-pid-1 
@@ -65,9 +67,11 @@ arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/p
 arg2 dev-bind '/dev/dri'
 arg2 bind '/srv/steam_d'
 arg2 ro-bind '/sys/devices/system/cpu'
-seccomp "${HOME}/pr/sljail/seccomp/default"
+seccomp "${HOME}/pr/sljail/seccomp/default.c"
 dbus-system
 dbus-user
+
+arg2 ro-bind '/etc/speech-dispatcher'
 
 ################################################################################
 
