@@ -36,14 +36,13 @@ say() {
 	printf '%s: %s\n' "${SLJAIL_SELF_NAME}" "${1}" >&2
 }
 
-next_fd() {
-  { seq 0 255; ls -1 "/proc/${$}/fd"; } | sort -n | uniq -u | head -1
+usage() {
+  printf >&2 'usage: %s [OPTIONS...] [--] COMMAND [ARGS...]\n' "${SLJAIL_SELF_NAME}"
+  printf >&2 'flags:\n'
+  printf >&2 '  --help         Print this help\n'
+  printf >&2 '  --profile      Specify profile file\n'
+  printf >&2 '  --name         Specify instance name\n'
 }
-
-# alloc_fd() {
-#   exec {fd}<"${1}"
-#   printf '%d' "${fd}"
-# }
 
 # add bubblewrap argument
 # example:
@@ -154,6 +153,7 @@ EOF
   arg bind-data "${fd}" '/etc/host.conf'
 }
 
+# spoof /etc/nsswitch.conf file
 nsswitch.conf() {
   local nsswitch_conf="$(cat <<EOF
 passwd: files
@@ -186,7 +186,8 @@ dbus-system() {
 dbus-user() {
   enable_dbus_user=true
   arg setenv 'DBUS_SESSION_BUS_ADDRESS' "unix:path=${SANDBOX_XDG_RUNTIME_DIR}/bus" 
-  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" '/run/user/1000/bus' 
+  # FIXME: hardcoded dbus path
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_XDG_RUNTIME_DIR}/bus" 
 }
 
 # use precompiled bpf file as a seccomp-bpf filter of the sandbox
@@ -211,6 +212,7 @@ seccomp() {
   arg seccomp "${fd}"
 }
 
+# set the name of this instance. will influence things like it's runtime dir and state dir (home jail), etc.
 # shellcheck disable=2034
 name() {
   SLJAIL_INSTANCE_NAME="${1}"
@@ -232,9 +234,10 @@ while :; do
     -p | --profile)
       profile=${2-}
       shift
-      [ -z "${profile}" ] && say 'ERROR: "--profile" requires a non-empty option argument.' && exit 1
+      [ -z "${profile}" ] && say 'ERROR: `--profile` requires a non-empty option argument.' && exit 1
       ;;
     -n | --name)
+      [ -z "${2-}" ] && say 'ERROR: `--name` requires a non-empty option argument.' && exit 1
       name "${2-}"
       shift
       ;;
@@ -273,6 +276,7 @@ source "${profile}"
 ################################################################################
 
 # positional arguments
+[ -z "${1-}" ] && say 'ERROR: `COMMAND` is required' && usage && exit 1
 program="${1}" && shift
 
 # setup args for xdg dbus proxy
@@ -280,29 +284,33 @@ program="${1}" && shift
 # wait for proxies to start or something, didn't work, but haven't caused any
 # problems either.
 exec {xdg_dbus_proxy_fd}<>"$(mktemp)"
-xdg_dbus_proxy_args=(--fd="${xdg_dbus_proxy_fd}")
-[ "${enable_dbus_system}" = true ] && mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}" && xdg_dbus_proxy_args+=(
+xdg_dbus_proxy_args=(
+  --fd="${xdg_dbus_proxy_fd}"
+)
+[ "${enable_dbus_system}" = true ] && xdg_dbus_proxy_args+=(
   unix:path="/run/dbus/system_bus_socket"
   "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
   --filter "${dbus_system_args[@]}"
+  --log
 )
-[ "${enable_dbus_user}" = true ] && mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}" && xdg_dbus_proxy_args+=(
+[ "${enable_dbus_user}" = true ] && xdg_dbus_proxy_args+=(
   unix:path="${XDG_RUNTIME_DIR}/bus"
   "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
   --filter "${dbus_user_args[@]}"
+  --log
 )
 
 # start xdg dbus proxy
-if [ "${enable_dbus_system}" = true ] || [ "${enable_dbus_user}" = true ]; then
+if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system}" = true ] || [ "${enable_dbus_user}" = true ]; }; then
+  mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}"
   xdg-dbus-proxy "${xdg_dbus_proxy_args[@]}" &
   xdg_dbus_proxy_pid="${!}"
+  # shellcheck disable=2064
+  trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
 fi
 
 # wait for proxies
-# read _ <&"${xdg_dbus_proxy_fd}"
-
-# shellcheck disable=2064
-trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
+cat <&"${xdg_dbus_proxy_fd}"
 
 # execute bwrap with the arguments
 if [ -z "${DEBUG-}" ]; then 
