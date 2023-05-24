@@ -1,229 +1,284 @@
 #!/usr/bin/env bash
 
-set -e
+set -ue
+
+SLJAIL_SELF_NAME="$(basename "${0}")"
 
 : "${XDG_RUNTIME_DIR:="/run/user/$(id -u)"}"
 : "${XDG_DATA_HOME:="${HOME}/.local/share"}"
 : "${XDG_STATE_HOME:="${HOME}/.local/state"}"
+: "${XDG_CACHE_HOME:="${HOME}/.cache"}"
+: "${XDG_CONFIG_HOME:="${HOME}/.config"}"
 
-: "${SANDBOX_STATE_HOME:="${XDG_STATE_HOME}/sandbox"}"
-INSTANCE_HOME="${SANDBOX_STATE_HOME}/${SANDBOX_INSTANCE_NAME}"
+: "${SLJAIL_STATE_HOME:="${XDG_STATE_HOME}/sljail"}"
+: "${SLJAIL_RUNTIME_DIR:="${XDG_RUNTIME_DIR}/sljail"}"
 
-arg() {
-  _arg="${1}"
-  shift
-  args+=("--${_arg}" ${@})
+SLJAIL_INSTANCE_NAME=
+SLJAIL_INSTANCE_HOME=
+SLJAIL_INSTANCE_USER_HOME=
+SLJAIL_INSTANCE_RUNTIME_DIR=
+
+SANDBOX_USER="${USER}"
+SANDBOX_UID=1000
+SANDBOX_GID=1000
+SANDBOX_HOSTNAME="$(cat '/etc/hostname')"
+SANDBOX_XDG_RUNTIME_DIR="/run/user/${SANDBOX_UID}"
+SANDBOX_HOME="/home/${SANDBOX_USER}"
+SANDBOX_XDG_DATA_HOME="${SANDBOX_HOME}/.local/share"
+SANDBOX_XDG_STATE_HOME="${SANDBOX_HOME}/.local/state"
+SANDBOX_XDG_CACHE_HOME="${SANDBOX_HOME}/.cache"
+SANDBOX_XDG_CONFIG_HOME="${SANDBOX_HOME}/.config"
+
+say() {
+	printf '%s: %s\n' "${SLJAIL_SELF_NAME}" "${1}" >&2
 }
 
-# Repeat the arg with all the other args - for binds
+next_fd() {
+  { seq 0 255; ls -1 "/proc/${$}/fd"; } | sort -n | uniq -u | head -1
+}
+
+# add bubblewrap argument
 # example:
-#   arg2 ro-bind-try '/usr'            # bind '/usr' to '/usr'
+#   arg symlink '/usr/lib' '/lib'      # symlink '/usr/lib' to '/lib' inside the sandbox
+#   arg unshare-all                    # unshare all namespaces
+arg() {
+  local arg_name="${1}"
+  shift
+  bwrap_args+=("--${arg_name}" ${@})
+}
+
+# repeat the arg with all the other args - for glob binds 
+# example:
+#   arg2 ro-bind-try '/usr' '/etc'     # bind '/usr' to '/usr', and '/etc' to '/etc'
 #   arg2 dev-bind-try '/dev/nvidia'*   # bind all /dev/nvidia* devices
 arg2() {
-  _bind_arg="${1}"
+  local arg_name="${1}"
 	shift
-	for _path in "${@}"; do
-		arg "${_bind_arg}" "${_path}" "${_path}"
+	for bind_arg in "${@}"; do
+		arg "${arg_name}" "${bind_arg}" "${bind_arg}"
 	done
 }
 
-# Change username and home directory inside of sandbox 
+# change username and home directory inside of the sandbox 
 user() {
-  arg setenv 'HOME' "/home/${1}"
-  arg chdir "/home/${1}"
+  SANDBOX_USER="${1}"
+  SANDBOX_HOME="/home/${SANDBOX_USER}"
+  SANDBOX_XDG_DATA_HOME="${SANDBOX_HOME}/.local/share"
+  SANDBOX_XDG_STATE_HOME="${SANDBOX_HOME}/.local/state"
+  SANDBOX_XDG_CACHE_HOME="${SANDBOX_HOME}/.cache"
+  SANDBOX_XDG_CONFIG_HOME="${SANDBOX_HOME}/.config"
+  arg dir "${SANDBOX_HOME}"
+  arg setenv 'HOME' "/home/${SANDBOX_USER}"
+  arg chdir "/home/${SANDBOX_USER}"
 }
 
+# spoof machine-id
+# argument should be 32-digit lowercase hex number
+# if no arguments supplied, random id is generated for you
 machine-id() {
-  exec {fd}< <(tr -dc '[:digit:]abcdef' < '/dev/urandom' | head -c 32)
-  arg file "${fd}" '/etc/machine-id'
+  local machine_id="${arg:-"$(tr -dc '[:digit:]abcdef' < '/dev/urandom' | head -c 32)"}"
+  exec {fd}< <(printf '%s' "${machine_id}")
+  arg bind-data "${fd}" '/etc/machine-id'
 }
 
-# initialize args array
-args=()
+# spoof /etc/passwd file
+passwd() {
+  local passwd="$(cat <<EOF
+  root:x:0:0::/root:/bin/bash
+  ${SANDBOX_USER}:x:${SANDBOX_UID}:${SANDBOX_GID}::${SANDBOX_HOME}:/bin/sh
+  nobody:x:65534:65534:Nobody:/:/usr/bin/nologin
+EOF
+  )"
+  exec {fd}< <(printf '%s' "${passwd}")
+  arg bind-data "${fd}" '/etc/passwd'
+}
 
-###############################################################################
+# spoof /etc/group file
+group() {
+  local group="$(cat <<EOF
+    root:x:0:root
+    ${SANDBOX_USER}:x:${SANDBOX_GID}:${SANDBOX_USER}
+    nobody:x:65534:
+EOF
+  )"
+  exec {fd}< <(printf '%s' "${group}")
+  arg bind-data "${fd}" '/etc/group'
+}
 
-# user 'user'
-#
-# arg dir "/home/${SANDBOX_INSTANCE_NAME}"
-# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.config"
-# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.cache"
-# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.local/share"
-# arg dir "/home/${SANDBOX_INSTANCE_NAME}/.local/state"
-#
-# arg symlink '/usr/lib' '/lib'
-# arg symlink '/usr/lib' '/lib64'
-# arg symlink '/usr/bin' '/bin'
-# arg symlink '/usr/bin' '/sbin'
-# arg symlink '/run' '/var/run'
-#
-# arg tmpfs '/tmp'
-# arg proc '/proc'
-# arg dev '/dev'
-# arg dir '/etc'
-# arg dir '/var'
-# arg dir "$XDG_RUNTIME_DIR"
-# arg bind "$STEAM_HOME" "$HOME"
-#
-# arg2 ro-bind-try '/usr'
-# arg2 ro-bind-try '/etc'
-# arg2 ro-bind-try '/opt'
-# arg2 ro-bind-try '/sys'
-# arg2 ro-bind-try '/var/empty'
-# arg2 ro-bind-try '/var/lib/alsa'
-# arg2 ro-bind-try '/var/lib/dbus'
-# arg2 ro-bind-try "${XDG_RUNTIME_DIR}/systemd/resolve"
-#
-# arg2 dev-bind-try '/dev/dri' 
-# arg2 dev-bind-try '/dev/nvidia'*
-#
-# # steam
-# arg bind-try "$HOME/.Xauthority" 
-# arg bind-try "$HOME/.local/bin/proton" 
-# arg bind-try "$HOME/.pki" 
-# arg bind-try "$HOME/.steam" 
-# arg bind-try "$HOME/.steampath" 
-# arg bind-try "$HOME/.steampid" 
-# arg bind-try "$HOME/Downloads" 
-# arg bind-try "$XDG_RUNTIME_DIR/.mutter-X"* 
-# arg bind-try "$XDG_RUNTIME_DIR/ICE"* 
-# arg bind-try "$XDG_RUNTIME_DIR/dbus"* 
-# arg bind-try "$XDG_RUNTIME_DIR/gnome"* 
-# arg bind-try "$XDG_RUNTIME_DIR/pipewire"* 
-# arg bind-try "$XDG_RUNTIME_DIR/pulse"* 
-# arg bind-try "$XDG_RUNTIME_DIR/wayland"* 
-# arg bind-try "$XDG_RUNTIME_DIR/at-spi" 
-# arg bind-try "$XDG_RUNTIME_DIR/bus" 
-# arg bind-try "$XDG_RUNTIME_DIR/dconf" 
-# arg bind-try "$XDG_RUNTIME_DIR/systemd" 
-# arg bind-try "$XDG_CACHE_HOME/mesa_shader_cache" 
-# arg bind-try "$XDG_CACHE_HOME/nv" 
-# arg bind-try "$XDG_CACHE_HOME/nvidia" 
-# arg bind-try "$XDG_CACHE_HOME/radv_builtin_shaders64" 
-# arg bind-try "$XDG_CONFIG_HOME/Epic" 
-# arg bind-try "$XDG_CONFIG_HOME/Loop_Hero" 
-# arg bind-try "$XDG_CONFIG_HOME/MangoHud" 
-# arg bind-try "$XDG_CONFIG_HOME/ModTheSpire" 
-# arg bind-try "$XDG_CONFIG_HOME/RogueLegacy" 
-# arg bind-try "$XDG_CONFIG_HOME/RogueLegacyStorageContainer" 
-# arg bind-try "$XDG_CONFIG_HOME/cef_user_data" 
-# arg bind-try "$XDG_CONFIG_HOME/proton" 
-# arg bind-try "$XDG_CONFIG_HOME/pulse" 
-# arg bind-try "$XDG_CONFIG_HOME/unity3d" 
-# arg bind-try "$XDG_DATA_HOME/3909/PapersPlease" 
-# arg bind-try "$XDG_DATA_HOME/Colossal Order" 
-# arg bind-try "$XDG_DATA_HOME/Dredmor" 
-# arg bind-try "$XDG_DATA_HOME/FasterThanLight" 
-# arg bind-try "$XDG_DATA_HOME/HotlineMiami" 
-# arg bind-try "$XDG_DATA_HOME/IntoTheBreach" 
-# arg bind-try "$XDG_DATA_HOME/Paradox Interactive" 
-# arg bind-try "$XDG_DATA_HOME/PillarsOfEternity" 
-# arg bind-try "$XDG_DATA_HOME/RogueLegacy" 
-# arg bind-try "$XDG_DATA_HOME/RogueLegacyStorageContainer" 
-# arg bind-try "$XDG_DATA_HOME/Steam" 
-# arg bind-try "$XDG_DATA_HOME/SuperHexagon" 
-# arg bind-try "$XDG_DATA_HOME/Terraria" 
-# arg bind-try "$XDG_DATA_HOME/applications" 
-# arg bind-try "$XDG_DATA_HOME/aspyr-media" 
-# arg bind-try "$XDG_DATA_HOME/bohemiainteractive" 
-# arg bind-try "$XDG_DATA_HOME/cdprojektred" 
-# arg bind-try "$XDG_DATA_HOME/feral-interactive" 
-# arg bind-try "$XDG_DATA_HOME/frictionalgames" 
-# arg bind-try "$XDG_DATA_HOME/icons" 
-# arg bind-try "$XDG_DATA_HOME/proton" 
-# arg bind-try "$XDG_DATA_HOME/vpltd" 
-# arg bind-try "$XDG_DATA_HOME/vulkan" 
-# arg bind-try "/var/lib/bluetooth" 
-# arg bind-try '/run/systemd' 
-# arg bind-try '/tmp/.ICE-unix' 
-# arg bind-try '/tmp/.X11-unix'
+# set localtime
+# example:
+#   localtime '/usr/share/zoneinfo/Turkey'
+localtime() {
+  exec {fd}<"${1}"
+  arg bind-data "${fd}" '/etc/localtime'
+}
 
-################################################################################
+# set hostname
+# example:
+#   hostname 'sandboxed-pc'
+hostname() {
+  SANDBOX_HOSTNAME="${1}"
+  exec {fd}< <(printf '%s' "${SANDBOX_HOSTNAME}")
+  arg bind-data "${fd}" '/etc/hostname'
+}
 
-arg unshare-all
-arg die-with-parent
-arg as-pid-1 
-arg new-session 
-arg uid 1000 
-arg gid 1000 
-arg proc '/proc' 
-arg dev '/dev' 
-arg clearenv 
+# spoof /etc/hosts file
+hosts() {
+  local hosts="$(cat <<EOF
+    127.0.0.1	localhost
+    ::1		localhost
+    127.0.0.1	${SANDBOX_HOSTNAME}.localdomain	${SANDBOX_HOSTNAME}
+EOF
+  )"
+  exec {fd}< <(printf '%s' "${hosts}")
+  arg bind-data "${fd}" '/etc/hosts'
+}
 
-arg2 ro-bind '/usr'
-arg2 ro-bind '/opt'
+# spoof /etc/host.conf file
+host.conf() {
+  local host_conf="$(cat <<EOF
+  multi on
+EOF
+  )"
+  exec {fd}< <(printf '%s' "${host_conf}")
+  arg bind-data "${fd}" '/etc/host.conf'
+}
 
-arg symlink '/usr/lib' '/lib' 
-arg symlink '/usr/bin' '/bin' 
-arg symlink '/usr/lib' '/lib64' 
-arg symlink '/usr/bin' '/sbin' 
+nsswitch.conf() {
+  local nsswitch_conf="$(cat <<EOF
+    passwd: files
+    group: files
+    shadow: files
 
-arg2 ro-bind '/etc/login.defs'
-arg2 ro-bind-try '/etc/ld.so.cache'
-arg2 ro-bind-try '/etc/ld.so.conf'
-arg2 ro-bind-try '/etc/ld.so.conf.d'
+    publickey: files
 
-arg dir /tmp 
-arg dir /var 
-arg perms 700 
-arg dir /run/user/1000 
-arg dir /usr/local 
+    hosts: files myhostname dns
+    networks: files
 
-arg bind '/home/nrv/.local/share/bubblejail/instances/steam-nrv/home' '/home/user' 
-arg setenv 'USER' 'user' 
-arg setenv 'USERNAME' 'user' 
-arg setenv 'HOME' '/home/user' 
-arg setenv 'PATH' '/usr/local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/lib/jvm/default/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl:/usr/lib/plan9/bin' 
-arg setenv 'XDG_RUNTIME_DIR' '/run/user/1000' 
-arg setenv 'LANG' 'en_US.UTF-8' 
-arg file 6 '/etc/passwd' 
-arg file 7 '/etc/group' 
-arg file 8 '/etc/nsswitch.conf' 
-arg file 9 '/etc/host.conf' 
-arg file 10 '/etc/hostname' 
-arg file 11 '/etc/hosts' 
-arg file 12 '/etc/machine-id' 
-arg ro-bind '/etc/localtime' '/etc/localtime' 
-arg setenv 'XDG_SESSION_TYPE' 'X11' 
-arg setenv 'XDG_CURRENT_DESKTOP' 'gnome' 
-arg setenv 'DISPLAY' ':0' 
-arg bind '/tmp/.X11-unix/X0' '/tmp/.X11-unix/X0' 
-arg ro-bind '/home/nrv/.Xauthority' '/tmp/.Xauthority' 
-arg ro-bind '/etc/fonts' '/etc/fonts' 
-arg setenv 'XAUTHORITY' '/tmp/.Xauthority' 
-arg share-net 
-arg2 ro-bind '/etc/resolv.conf'
-arg2 ro-bind '/etc/ca-certificates'
-arg2 ro-bind '/etc/ssl'
-arg2 bind '/run/user/1000/pulse/native'
-arg2 bind '/home/nrv/.local/share/Steam'
-arg2 bind '/home/nrv/.config/vkBasalt/vkBasalt.conf'
-arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/card0' '/sys/dev/char/226:0' 
-arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
-arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/renderD128' '/sys/dev/char/226:128' 
-arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
-arg dev-bind '/dev/dri' '/dev/dri' 
-arg2 bind '/srv/steam_d'
-arg2 ro-bind '/sys/devices/system/cpu'
-arg seccomp 13 
-arg setenv 'DBUS_SESSION_BUS_ADDRESS' 'unix:path=/run/user/1000/bus' 
-arg2 bind '/run/user/1000/bubblejail/steam-nrv/dbus_session_proxy' '/run/user/1000/bus' 
-arg2 bind '/run/user/1000/bubblejail/steam-nrv/dbus_system_proxy' '/var/run/dbus/system_bus_socket' 
-arg2 bind '/run/user/1000/bubblejail/steam-nrv/dbus_system_proxy' '/run/dbus/system_bus_socket' 
-arg2 bind '/run/user/1000/bubblejail/steam-nrv/helper' '/run/bubblehelp' 
-arg2 chdir '/home/user'
+    protocols: files
+    services: files
+    ethers: files
+    rpc: files
 
-# Bwrap args:
-# /usr/bin/bwrap --args 16 /usr/lib/bubblejail/bubblejail-helper /usr/bin/steam
-# Dbus session args
-#xdg-dbus-proxy \
-#  unix:path="/run/user/1000/bus" \
-#  "/run/user/1000/bubblejail/steam-nrv/dbus_session_proxy" \
-#  --fd=15 \
-#  --filter unix:path="/run/dbus/system_bus_socket"
-#  "/run/user/1000/bubblejail/steam-nrv/dbus_system_proxy" \
-#  --filter
+    netgroup: files
+EOF
+  )"
+  exec {fd}< <(printf '%s' "${nsswitch_conf}")
+  arg bind-data "${fd}" '/etc/nsswitch.conf'
+}
+
+dbus-system() {
+  enable_dbus_system=true
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/var/run/dbus/system_bus_socket' 
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/run/dbus/system_bus_socket' 
+}
+
+dbus-user() {
+  enable_dbus_user=true
+  arg setenv 'DBUS_SESSION_BUS_ADDRESS' "unix:path=${SANDBOX_XDG_RUNTIME_DIR}/bus" 
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" '/run/user/1000/bus' 
+}
+
+seccomp() {
+  exec {fd}<"${1}"
+  arg seccomp "${fd}"
+}
+
+name() {
+  SLJAIL_INSTANCE_NAME="${1}"
+  SLJAIL_INSTANCE_HOME="${SLJAIL_STATE_HOME}/${SLJAIL_INSTANCE_NAME}"
+  SLJAIL_INSTANCE_USER_HOME="${SLJAIL_INSTANCE_HOME}/home"
+  SLJAIL_INSTANCE_RUNTIME_DIR="${SLJAIL_RUNTIME_DIR}/${SLJAIL_INSTANCE_NAME}"
+}
+
+# Reset all variables that might be set
+profile=
+verbose=0 # Variables to be evaluated as shell arithmetic should be initialized to a default or validated beforehand.
+
+while :; do
+  case "${1-}" in
+    -h|-\?|--help)   # Call a "usage" function to display a synopsis, then exit.
+      usage
+      exit
+      ;;
+    -p | --profile)
+      profile=${2-}
+      shift
+      [ -z "${profile}" ] && say 'ERROR: "--profile" requires a non-empty option argument.' && exit 1
+      ;;
+    -n | --name)
+      name "${2-}"
+      shift
+      ;;
+    -v|--verbose)
+      verbose=$((verbose + 1)) # Each -v argument adds 1 to verbosity.
+      ;;
+    --)              # End of all options.
+      shift
+      break
+      ;;
+    -?*)
+      say "ERROR: unknown option: ${1}"
+      ;;
+    *)               # Default case: If no more options then break out of the loop.
+      break
+  esac
+
+  shift
+done
+
+# validate arguments
+[ -z "${profile}" ] && say 'ERROR: --profile is required.' && exit 1
+[ -z "${SLJAIL_INSTANCE_NAME}" ] && say 'ERROR: sljail instance is required to have a name. Either pass it through the --name argument, or specify it in the profile.' && exit 1
+
+# initialize args arrays
+bwrap_args=()
+dbus_system_args=()
+dbus_user_args=()
 
 ################################################################################
 
-echo "${args[@]}" "${1}" "$@" | sed 's/--/\n--/g'
+# source the profile
+# shellcheck disable=1090
+source "${profile}"
+
+################################################################################
+
+# positional arguments
+program="${1}" && shift
+
+# setup args for xdg dbus proxy
+exec {fd}<>"$(mktemp)"
+xdg_dbus_proxy_args=(--fd="${fd}")
+[ "${enable_dbus_system}" = true ] && mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}" && xdg_dbus_proxy_args+=(
+  unix:path="/run/dbus/system_bus_socket"
+  "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
+  --filter "${dbus_system_args[@]}"
+)
+[ "${enable_dbus_user}" = true ] && mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}" && xdg_dbus_proxy_args+=(
+  unix:path="${XDG_RUNTIME_DIR}/bus"
+  "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
+  --filter "${dbus_user_args[@]}"
+)
+
+# start xdg dbus proxy
+if [ "${enable_dbus_system}" = true ] || [ "${enable_dbus_user}" = true ]; then
+  xdg-dbus-proxy "${xdg_dbus_proxy_args[@]}" &
+  xdg_dbus_proxy_pid="${!}"
+fi
+
+# wait for proxies
+# read _ <&"${fd}"
+# printf 'after\n'
+
+sleep 3
+
+trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
+
+# execute bwrap with the arguments
+if [ -z "${DEBUG-}" ]; then 
+  bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
+else
+  echo "${bwrap_args[@]}" | sed 's/--/\n--/g'
+  echo "${program}" "${@}"
+fi
