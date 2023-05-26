@@ -24,7 +24,7 @@ SLJAIL_INSTANCE_HOME=
 SLJAIL_INSTANCE_USER_HOME=
 SLJAIL_INSTANCE_RUNTIME_DIR=
 
-# would-be environment inside the sandbox 
+# would-be environment inside the sandbox
 # (the normal names but prefixed with 'SANDBOX_')
 SANDBOX_USER="${USER}"
 SANDBOX_UID=1000
@@ -39,7 +39,7 @@ SANDBOX_XDG_CONFIG_HOME="${SANDBOX_HOME}/.config"
 SANDBOX_DBUS_SESSION_BUS_ADDRESS="${SANDBOX_XDG_RUNTIME_DIR}/bus"
 
 say() {
-	printf '%s: %s\n' "${SLJAIL_SELF_NAME}" "${1}" >&2
+  printf '%s: %s\n' "${SLJAIL_SELF_NAME}" "${1}" >&2
 }
 
 usage() {
@@ -61,19 +61,19 @@ arg() {
   bwrap_args+=("--${arg_name}" ${@})
 }
 
-# repeat the arg with all the other args - for glob binds 
+# repeat the arg with all the other args - for glob binds
 # example:
 #   arg2 ro-bind-try '/usr' '/etc'     # bind '/usr' to '/usr', and '/etc' to '/etc'
 #   arg2 dev-bind-try '/dev/nvidia'*   # bind all /dev/nvidia* devices
 arg2() {
   local arg_name="${1}"
-	shift
-	for bind_arg in "${@}"; do
-		arg "${arg_name}" "${bind_arg}" "${bind_arg}"
-	done
+  shift
+  for bind_arg in "${@}"; do
+    arg "${arg_name}" "${bind_arg}" "${bind_arg}"
+  done
 }
 
-# change username and home directory inside of the sandbox 
+# change username and home directory inside of the sandbox
 # shellcheck disable=2034
 user() {
   SANDBOX_USER="${1}"
@@ -91,14 +91,15 @@ user() {
 # argument should be 32-digit lowercase hex number
 # if no arguments supplied, random id is generated for you
 machine-id() {
-  local machine_id="${arg:-"$(tr -dc '[:digit:]abcdef' < '/dev/urandom' | head -c 32)"}"
+  local machine_id="${arg:-"$(tr -dc '[:digit:]abcdef' <'/dev/urandom'  | head -c 32)"}"
   exec {fd}< <(printf '%s' "${machine_id}")
   arg bind-data "${fd}" '/etc/machine-id'
 }
 
 # spoof /etc/passwd file
 passwd() {
-  local passwd="$(cat <<EOF
+  local passwd="$(
+    cat <<EOF
 root:x:0:0::/root:/bin/bash
 ${SANDBOX_USER}:x:${SANDBOX_UID}:${SANDBOX_GID}::${SANDBOX_HOME}:/bin/sh
 nobody:x:65534:65534:Nobody:/:/usr/bin/nologin
@@ -110,7 +111,8 @@ EOF
 
 # spoof /etc/group file
 group() {
-  local group="$(cat <<EOF
+  local group="$(
+    cat <<EOF
 root:x:0:root
 ${SANDBOX_USER}:x:${SANDBOX_GID}:${SANDBOX_USER}
 nobody:x:65534:
@@ -139,7 +141,8 @@ hostname() {
 
 # spoof /etc/hosts file
 hosts() {
-  local hosts="$(cat <<EOF
+  local hosts="$(
+    cat <<EOF
 127.0.0.1	localhost
 ::1		localhost
 127.0.0.1	${SANDBOX_HOSTNAME}.localdomain	${SANDBOX_HOSTNAME}
@@ -151,7 +154,8 @@ EOF
 
 # spoof /etc/host.conf file
 host.conf() {
-  local host_conf="$(cat <<EOF
+  local host_conf="$(
+                     cat <<EOF
 multi on
 EOF
   )"
@@ -161,7 +165,8 @@ EOF
 
 # spoof /etc/nsswitch.conf file
 nsswitch.conf() {
-  local nsswitch_conf="$(cat <<EOF
+  local nsswitch_conf="$(
+    cat <<EOF
 passwd: files
 group: files
 shadow: files
@@ -185,15 +190,15 @@ EOF
 
 dbus-system() {
   enable_dbus_system=true
-  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/var/run/dbus/system_bus_socket' 
-  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/run/dbus/system_bus_socket' 
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/var/run/dbus/system_bus_socket'
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/run/dbus/system_bus_socket'
 }
 
 dbus-user() {
   enable_dbus_user=true
-  arg setenv 'DBUS_SESSION_BUS_ADDRESS' "${DBUS_SESSION_BUS_ADDRESS}" 
+  arg setenv 'DBUS_SESSION_BUS_ADDRESS' "${DBUS_SESSION_BUS_ADDRESS}"
   # FIXME: hardcoded dbus path
-  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_DBUS_SESSION_BUS_ADDRESS}" 
+  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_DBUS_SESSION_BUS_ADDRESS}"
 }
 
 # add a xdg-dbus-proxy policy as per it's manpage.
@@ -220,7 +225,9 @@ seccomp-precompiled() {
 }
 
 # use a C source file that exports seccomp-bpf filter to stdout as a
-# seccomp-bpf filter of the sandbox
+# seccomp-bpf filter of the sandbox.
+# this function also caches already compiled binaries and bpfs that they
+# export.
 seccomp() {
   local seccomp_profile="${1}" # /home/pr/sljail/seccomp/default.c
   local seccomp_profile_name="$(basename "${seccomp_profile}")" # default.c
@@ -229,7 +236,7 @@ seccomp() {
   if ! [ -f "${binary}" ]; then
     mkdir -p "$(dirname "${binary}")"
     gcc "${SLJAIL_GCC_ARGS[@]}" -o "${binary}" "${seccomp_profile}"
-    "${binary}" > "${binary}.bpf"
+    "${binary}" >"${binary}.bpf"
   fi
   exec {fd}<"${binary}.bpf"
   arg seccomp "${fd}"
@@ -244,16 +251,15 @@ name() {
   SLJAIL_INSTANCE_RUNTIME_DIR="${SLJAIL_RUNTIME_DIR}/${SLJAIL_INSTANCE_NAME}"
 }
 
-# Reset all variables that might be set
+# parse arguments
 profile=
-
 while :; do
   case "${1-}" in
-    -h|-\?|--help)   # Call a "usage" function to display a synopsis, then exit.
+    -h | -\? | --help) # call a "usage" function to display a synopsis, then exit.
       usage
       exit
       ;;
-    -p | --profile)
+    -p | --profile) # get profile file and continue.
       profile=${2-}
       shift
       [ -z "${profile}" ] && say 'ERROR: `--profile` requires a non-empty option argument.' && exit 1
@@ -263,17 +269,16 @@ while :; do
       name "${2-}"
       shift
       ;;
-    --)              # end of all options.
+    --) # break option parsing, treat everything as positional arguments after it.
       shift
       break
       ;;
-    -?*)
+    -?*) # unknown option
       say "ERROR: unknown option: ${1}"
       ;;
-    *)               # default case: if no more options then break out of the loop.
-      break
+    *) # default case: if no more options then break out of the loop.
+      break ;;
   esac
-
   shift
 done
 
@@ -335,7 +340,7 @@ if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_db
 fi
 
 # execute bwrap with the arguments or print arguments if DEBUG
-if [ -z "${DEBUG-}" ]; then 
+if [ -z "${DEBUG-}" ]; then
   # DANGER: rm -rf of dynamic value. nothing bad happens, right?
   # shellcheck disable=2064
   trap "rm -rf '${SLJAIL_INSTANCE_RUNTIME_DIR}'" EXIT TERM HUP
