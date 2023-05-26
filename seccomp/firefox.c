@@ -84,7 +84,9 @@ int main() {
   seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS (umount), 0);
   seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS (umount2), 0);
   seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS (pivot_root), 0);
-  seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS (chroot), 0);
+  /* NOTE: this is basically default config with chroot enabled.
+   * `firefox` uses chroot and dont work without it. */
+  // seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS (chroot), 0);
 #if defined(__s390__) || defined(__s390x__) || defined(__CRIS__)
   /* Architectures with CONFIG_CLONE_BACKWARDS2: the child stack
      * and flags arguments are reversed so the flags come second */
@@ -128,3 +130,4 @@ int main() {
   seccomp_release(ctx);
   return 0;
 }
+

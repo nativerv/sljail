@@ -1,0 +1,79 @@
+# shellcheck shell=bash
+
+arg clearenv 
+
+arg ro-bind-try /etc/alsa /etc/alsa
+arg ro-bind-try /etc/pulse /etc/pulse
+arg ro-bind-try /etc/pipewire /etc/pipewire
+arg symlink '/usr/lib' '/lib'
+arg symlink '/usr/lib64' '/lib64'
+arg symlink '/usr/bin' '/bin'
+arg symlink '/usr/bin' '/sbin'
+arg ro-bind '/usr/lib' '/usr/lib'
+arg ro-bind '/usr/lib64' '/usr/lib64'
+arg ro-bind '/usr/bin' '/usr/bin'
+arg ro-bind '/usr/lib/firefox' '/usr/lib/firefox'
+arg ro-bind '/usr/share/applications' '/usr/share/applications'
+arg ro-bind '/usr/share/gtk-3.0' '/usr/share/gtk-3.0'
+arg ro-bind '/usr/share/fontconfig' '/usr/share/fontconfig'
+arg ro-bind '/usr/share/icu' '/usr/share/icu'
+arg ro-bind '/usr/share/drirc.d' '/usr/share/drirc.d'
+arg ro-bind '/usr/share/fonts' '/usr/share/fonts'
+arg ro-bind '/usr/share/glib-2.0' '/usr/share/glib-2.0'
+arg ro-bind '/usr/share/glvnd' '/usr/share/glvnd'
+arg ro-bind '/usr/share/icons' '/usr/share/icons'
+arg ro-bind '/usr/share/libdrm' '/usr/share/libdrm'
+arg ro-bind '/usr/share/mime' '/usr/share/mime'
+arg ro-bind '/usr/share/X11/xkb' '/usr/share/X11/xkb'
+arg ro-bind '/usr/share/icons' '/usr/share/icons'
+arg ro-bind '/usr/share/mime' '/usr/share/mime'
+arg ro-bind '/etc/fonts' '/etc/fonts'
+arg ro-bind '/etc/resolv.conf' '/etc/resolv.conf'
+arg ro-bind '/usr/share/ca-certificates' '/usr/share/ca-certificates'
+arg ro-bind '/etc/ssl' '/etc/ssl'
+arg ro-bind '/etc/ca-certificates' '/etc/ca-certificates'
+arg dir "${SANDBOX_XDG_RUNTIME_DIR}"
+arg ro-bind "${XDG_RUNTIME_DIR}"/pulse/native "${SANDBOX_XDG_RUNTIME_DIR}"/pulse/native
+arg ro-bind-try "${XDG_RUNTIME_DIR}"/wayland-1 "${SANDBOX_XDG_RUNTIME_DIR}"/wayland-1
+arg dev '/dev'
+arg dev-bind '/dev/dri' '/dev/dri'
+arg ro-bind '/sys/dev/char' '/sys/dev/char'
+arg ro-bind '/sys/devices/pci0000:00' '/sys/devices/pci0000:00'
+arg2 ro-bind '/sys/bus/pci'
+arg proc '/proc'
+arg tmpfs '/tmp'
+user 'user'
+arg setenv 'GTK_THEME' Adwaita:dark
+#arg setenv 'MOZ_ENABLE_WAYLAND' 1
+arg setenv 'PATH' '/usr/bin'
+arg unshare-all
+arg share-net
+arg die-with-parent
+arg as-pid-1
+arg new-session
+arg uid "${SANDBOX_UID}"
+arg gid "${SANDBOX_GID}"
+
+arg setenv 'USER' "${SANDBOX_USER}"
+arg setenv 'USERNAME' "${SANDBOX_USER}"
+arg setenv 'HOME' "${SANDBOX_HOME}"
+arg setenv 'DISPLAY' ':0' 
+arg setenv 'XAUTHORITY' "/tmp/.Xauthority"
+arg2 bind '/tmp/.X11-unix/X0'
+arg ro-bind "${XAUTHORITY}" '/tmp/.Xauthority' 
+arg setenv 'XDG_RUNTIME_DIR' "${SANDBOX_XDG_RUNTIME_DIR}"
+
+arg setenv 'LANG' 'en_US.UTF-8' 
+arg setenv 'XDG_SESSION_TYPE' 'X11' 
+arg setenv 'XDG_CURRENT_DESKTOP' 'gnome' 
+
+passwd
+group
+nsswitch.conf
+host.conf
+hostname 'ubuntu'
+hosts
+machine-id
+localtime '/usr/share/zoneinfo/Turkey'
+
+seccomp "${HOME}/pr/sljail/seccomp/firefox.c"
