@@ -196,6 +196,23 @@ dbus-user() {
   arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_DBUS_SESSION_BUS_ADDRESS}" 
 }
 
+# add a xdg-dbus-proxy policy as per it's manpage.
+# example:
+#  dbus-user.talk "org.freedesktop.Notifications"
+dbus-user.own() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.talk() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.see() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.call() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.broadcast() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.log() { dbus_user_args+=(--log); }
+
+dbus-system.own() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.talk() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.see() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.call() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.broadcast() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.log() { dbus_system_args+=(--log); }
+
 # use precompiled bpf file as a seccomp-bpf filter of the sandbox
 seccomp-precompiled() {
   exec {fd}<"${1}"
@@ -229,7 +246,6 @@ name() {
 
 # Reset all variables that might be set
 profile=
-verbose=0 # Variables to be evaluated as shell arithmetic should be initialized to a default or validated beforehand.
 
 while :; do
   case "${1-}" in
@@ -247,17 +263,14 @@ while :; do
       name "${2-}"
       shift
       ;;
-    -v|--verbose)
-      verbose=$((verbose + 1)) # Each -v argument adds 1 to verbosity.
-      ;;
-    --)              # End of all options.
+    --)              # end of all options.
       shift
       break
       ;;
     -?*)
       say "ERROR: unknown option: ${1}"
       ;;
-    *)               # Default case: If no more options then break out of the loop.
+    *)               # default case: if no more options then break out of the loop.
       break
   esac
 
@@ -286,7 +299,7 @@ source "${profile}"
 program="${1}" && shift
 
 # start xdg dbus proxy
-if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system}" = true ] || [ "${enable_dbus_user}" = true ]; }; then
+if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_dbus_user-}" = true ]; }; then
   # setup args for xdg dbus proxy
   pipe="$(mktemp -u)"
   mkfifo "${pipe}"
@@ -299,13 +312,11 @@ if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system}" = true ] || [ "${enable_dbu
     'unix:path=/run/dbus/system_bus_socket'
     "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
     --filter "${dbus_system_args[@]}"
-    --log
   )
   [ "${enable_dbus_user}" = true ] && xdg_dbus_proxy_args+=(
     "${DBUS_SESSION_BUS_ADDRESS}"
     "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
     --filter "${dbus_user_args[@]}"
-    --log
   )
 
   mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}"
@@ -315,13 +326,12 @@ if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system}" = true ] || [ "${enable_dbu
   trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
 
   # wait for proxies
-  #sleep 3
   read -N 1 -r -u "${xdg_dbus_proxy_fd}" _byte
-  [ -n "${DEBUG-}" ] && {
-    say "xdg-dbus-proxy fd = ${xdg_dbus_proxy_fd}"
-    say "xdg-dbus-proxy args = ${xdg_dbus_proxy_args[*]}"
-    say "xdg-dbus-proxy byte = ${_byte}"
-  }
+  # [ -n "${DEBUG-}" ] && {
+  #   say "xdg-dbus-proxy fd = ${xdg_dbus_proxy_fd}"
+  #   say "xdg-dbus-proxy args = ${xdg_dbus_proxy_args[*]}"
+  #   say "xdg-dbus-proxy byte = ${_byte}"
+  # }
 fi
 
 # execute bwrap with the arguments or print arguments if DEBUG
@@ -332,6 +342,6 @@ if [ -z "${DEBUG-}" ]; then
   bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
 else
   # shellcheck disable=2001
-  echo "${bwrap_args[@]}" | sed 's/--/\n--/g'
-  echo "${program}" "${@}"
+  echo "${bwrap_args[@]}" | sed 's/--/\n--/g' >&2
+  echo "${program}" "${@}" >&2
 fi

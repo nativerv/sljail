@@ -1,15 +1,18 @@
+# shellcheck shell=bash
+# vim:ft=bash
+
 arg unshare-all
+arg share-net 
 arg die-with-parent
 arg as-pid-1 
 arg new-session 
 arg clearenv 
-arg uid 1000 
-arg gid 1000 
+arg uid "${SANDBOX_UID}"
+arg gid "${SANDBOX_GID}"
 arg proc '/proc' 
 arg dev '/dev' 
 
 arg2 ro-bind '/usr'
-arg2 ro-bind '/opt'
 
 arg symlink '/usr/lib' '/lib' 
 arg symlink '/usr/bin' '/bin' 
@@ -27,8 +30,8 @@ arg perms 700
 arg dir "${SANDBOX_XDG_RUNTIME_DIR}" 
 arg dir '/usr/local' 
 
-mkdir -p "${SLJAIL_INSTANCE_USER_HOME}" 
 user 'user'
+mkdir -p "${SLJAIL_INSTANCE_USER_HOME}" 
 arg bind "${SLJAIL_INSTANCE_USER_HOME}" "${SANDBOX_HOME}" 
 arg setenv 'USER' "${SANDBOX_USER}"
 arg setenv 'USERNAME' "${SANDBOX_USER}"
@@ -45,19 +48,25 @@ group
 nsswitch.conf
 host.conf
 hostname 'ubuntu'
+# TODO: investigate why setting --hostname breaks X11
+# > Authorization required, but no authorization protocol specified
+# > Error: cannot open display: :0
+arg hostname 'ubuntu'
 hosts
 machine-id
 localtime '/usr/share/zoneinfo/Turkey'
 arg2 bind '/tmp/.X11-unix/X0'
 arg ro-bind "${XAUTHORITY}" '/tmp/.Xauthority' 
 arg2 ro-bind '/etc/fonts'
-arg share-net 
 arg2 ro-bind '/etc/resolv.conf'
 arg2 ro-bind '/etc/ca-certificates'
 arg2 ro-bind '/etc/ssl'
-arg2 bind '/run/user/1000/pulse/native'
+arg bind "${XDG_RUNTIME_DIR}/pulse/native" "${SANDBOX_XDG_RUNTIME_DIR}/pulse/native"
 arg bind "${XDG_DATA_HOME}/Steam" "${SANDBOX_XDG_DATA_HOME}/Steam"
 arg ro-bind "${XDG_CONFIG_HOME}/vkBasalt" "${SANDBOX_XDG_CONFIG_HOME}/vkBasalt"
+# arg2 dev-bind '/sys/bus'
+# arg2 dev-bind '/sys/dev/char'
+# arg2 dev-bind '/sys/devices'
 arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/card0' '/sys/dev/char/226:0' 
 arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
 arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/renderD128' '/sys/dev/char/226:128' 
@@ -69,7 +78,9 @@ seccomp "${HOME}/pr/sljail/seccomp/default.c"
 dbus-system
 dbus-user
 
-arg2 ro-bind '/etc/speech-dispatcher'
+#dbus-system.log
+#dbus-user.log
+dbus-user.talk "org.freedesktop.Notifications"
 
 ################################################################################
 

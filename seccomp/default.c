@@ -9,7 +9,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-  /**** Note from author of this program:
+  /**** Note from nrv:
    * I took the following filter list from the Flatpak source code, at the following address:
    * https://github.com/flatpak/flatpak/blob/4c6136ab2146234bff37925b218026de846d584e/common/flatpak-run.c#L1780
    * It had the below note in it. So here it is.
