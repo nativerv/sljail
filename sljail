@@ -105,8 +105,9 @@ user() {
 # if no arguments supplied, random id is generated for you
 machine-id() {
   local machine_id="${arg:-"$(tr -dc '[:digit:]abcdef' <'/dev/urandom'  | head -c 32)"}"
-  exec {fd}< <(printf '%s' "${machine_id}")
+  exec {fd}< <(printf '%s\x0a' "${machine_id}")
   arg bind-data "${fd}" '/etc/machine-id'
+  arg symlink '/etc/machine-id' '/var/lib/dbus/machine-id'
 }
 
 # spoof /etc/passwd file
@@ -202,34 +203,33 @@ EOF
 }
 
 dbus-system() {
-  enable_dbus_system=true
-  arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/var/run/dbus/system_bus_socket'
   arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_system_proxy" '/run/dbus/system_bus_socket'
+  enable_dbus_system=true
 }
 
 dbus-user() {
-  enable_dbus_user=true
   arg setenv 'DBUS_SESSION_BUS_ADDRESS' "${DBUS_SESSION_BUS_ADDRESS}"
   # FIXME: hardcoded dbus path
   arg bind "${XDG_RUNTIME_DIR}/sljail/${SLJAIL_INSTANCE_NAME}/dbus_session_proxy" "${SANDBOX_DBUS_SESSION_BUS_ADDRESS}"
+  enable_dbus_user=true
 }
 
 # add a xdg-dbus-proxy policy as per it's manpage.
 # example:
 #  dbus-user.talk "org.freedesktop.Notifications"
-dbus-user.own() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-user.talk() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-user.see() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-user.call() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-user.broadcast() { dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-user.log() { dbus_user_args+=(--log); }
+dbus-user.own() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.talk() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.see() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.call() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.broadcast() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-user.log() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=(--log); }
 
-dbus-system.own() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-system.talk() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-system.see() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-system.call() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-system.broadcast() { dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
-dbus-system.log() { dbus_system_args+=(--log); }
+dbus-system.own() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.talk() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.see() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.call() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.broadcast() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
+dbus-system.log() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=(--log); }
 
 # use precompiled bpf file as a seccomp-bpf filter of the sandbox
 seccomp-precompiled() {
