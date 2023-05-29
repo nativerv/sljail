@@ -16,7 +16,11 @@ SLJAIL_SELF_NAME="$(basename "${0}")"
 : "${SLJAIL_STATE_HOME:="${XDG_STATE_HOME}/sljail"}"
 : "${SLJAIL_RUNTIME_DIR:="${XDG_RUNTIME_DIR}/sljail"}"
 : "${SLJAIL_CACHE_HOME:="${XDG_CACHE_HOME}/sljail"}"
+: "${SLJAIL_CONFIG_HOME:="${XDG_CONFIG_HOME}/sljail"}"
+: "${SLJAIL_PATH:="${SLJAIL_CONFIG_HOME}:/usr/share/sljail"}"
 SLJAIL_GCC_ARGS=(-Wall -Wextra -lseccomp)
+SLJAIL_SELF_PID="${$}"
+trap 'exit 1' USR1
 
 # sljail instance environment
 SLJAIL_INSTANCE_NAME=
@@ -48,6 +52,15 @@ usage() {
   printf >&2 '  --help         Print this help\n'
   printf >&2 '  --profile      Specify profile file\n'
   printf >&2 '  --name         Specify instance name\n'
+}
+
+# resolve a file from SLJAIL_PATH by name or use path to file
+sjfile() {
+  [ -f "${1}" ] && printf '%s' "${1}" && return
+  for dir in $(printf '%s' "${SLJAIL_PATH}" | tr ':' '\n') ; do
+    [ -f "${dir}/${1}" ] && printf '%s' "${dir}/${1}" && return
+  done
+  say "no such sljail file: ${1}" && kill -USR1 "${SLJAIL_SELF_PID}" >/dev/null
 }
 
 # add bubblewrap argument
@@ -260,7 +273,7 @@ while :; do
       exit
       ;;
     -p | --profile) # get profile file and continue.
-      profile=${2-}
+      profile="$(sjfile "${2-}")"
       shift
       [ -z "${profile}" ] && say 'ERROR: `--profile` requires a non-empty option argument.' && exit 1
       ;;
@@ -331,12 +344,7 @@ if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_db
   trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
 
   # wait for proxies
-  read -N 1 -r -u "${xdg_dbus_proxy_fd}" _byte
-  # [ -n "${DEBUG-}" ] && {
-  #   say "xdg-dbus-proxy fd = ${xdg_dbus_proxy_fd}"
-  #   say "xdg-dbus-proxy args = ${xdg_dbus_proxy_args[*]}"
-  #   say "xdg-dbus-proxy byte = ${_byte}"
-  # }
+  read -N 1 -r -u "${xdg_dbus_proxy_fd}" _
 fi
 
 # execute bwrap with the arguments or print arguments if DEBUG
