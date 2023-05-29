@@ -1,0 +1,115 @@
+# shellcheck shell=bash
+# shellcheck disable=1090
+
+### BASIC SETUP
+
+# seccomp rules
+seccomp "$(sjfile "seccomp/firefox.c")"
+
+# namespace args
+arg as-pid-1
+arg die-with-parent
+# create new namespace for everything by default
+arg unshare-all
+# firefox uses the internet obviously, so share net namespace
+arg share-net
+# new process session, which counters TIOCSTI (CVE-2023-28100) escape, just in case despite seccomp rules below block it
+arg new-session
+
+# make the FHS
+source "$(sjfile "profiles/lib/fhs.sjinclude")"
+
+# bind the SANDBOX_HOME to a jail dir on host
+mkdir -p "${SLJAIL_INSTANCE_USER_HOME}" 
+arg bind "${SLJAIL_INSTANCE_USER_HOME}" "${SANDBOX_HOME}" 
+
+# user stuff
+arg uid "${SANDBOX_UID}"
+arg gid "${SANDBOX_GID}"
+user 'user'
+
+# environment args
+arg clearenv
+arg setenv 'LANG' 'en_US.UTF-8'
+arg setenv 'XDG_CURRENT_DESKTOP' 'gnome'
+arg setenv 'XDG_RUNTIME_DIR' "${SANDBOX_XDG_RUNTIME_DIR}"
+arg setenv 'PATH' '/usr/bin'
+arg setenv 'USER' "${SANDBOX_USER}"
+arg setenv 'USERNAME' "${SANDBOX_USER}"
+arg setenv 'HOME' "${SANDBOX_HOME}"
+arg setenv 'GTK_THEME' 'Adwaita:dark'
+
+# spoof files
+passwd
+group
+nsswitch.conf
+host.conf
+hostname 'ubuntu'
+hosts
+machine-id
+localtime '/usr/share/zoneinfo/Turkey'
+
+### ALLOW RULES
+
+# allow gpu
+#arg ro-bind '/sys/dev/char' '/sys/dev/char'
+#arg ro-bind '/sys/devices/pci0000:00' '/sys/devices/pci0000:00'
+#arg2 ro-bind '/sys/bus/pci'
+#arg2 ro-bind '/sys/devices/system/cpu'
+arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/card0' '/sys/dev/char/226:0' 
+arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
+arg symlink '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0/drm/renderD128' '/sys/dev/char/226:128' 
+arg dev-bind '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' '/sys/devices/pci0000:00/0000:00:03.0/0000:01:00.0' 
+arg2 dev-bind '/dev/dri'
+arg2 dev-bind-try '/dev/nvidia'*
+
+# allow sound
+arg2 ro-bind-try '/etc/alsa'
+arg2 ro-bind-try '/etc/pulse'
+arg2 ro-bind-try '/etc/pipewire'
+arg2 ro-bind-try '/var/lib/alsa'
+arg ro-bind-try "${XDG_RUNTIME_DIR}/pulse/native" "${SANDBOX_XDG_RUNTIME_DIR}/pulse/native"
+
+# allow display server
+source "$(sjfile "profiles/lib/allow-display-server.sjinclude")"
+
+# allow /usr/share common
+source "$(sjfile "profiles/lib/allow-usr-share-common.sjinclude")"
+
+# allow /etc common
+arg2 ro-bind '/etc/fonts'
+arg2 ro-bind '/etc/resolv.conf'
+
+# bind ldconfig cache and configs
+arg2 ro-bind-try '/etc/ld.so.cache'
+arg2 ro-bind-try '/etc/ld.so.conf'
+arg2 ro-bind-try '/etc/ld.so.conf.d'
+
+# allow ssl/certificates
+arg2 ro-bind '/etc/ssl'
+arg2 ro-bind '/etc/ca-certificates'
+arg2 ro-bind '/usr/share/ca-certificates'
+
+# allow gtk
+arg2 ro-bind '/usr/share/gtk-3.0'
+
+# enable dbus proxies
+dbus-system
+dbus-user
+
+# allow notifications
+dbus-user.talk 'org.freedesktop.Notifications'
+# allow inhibiting screensavers
+dbus-user.talk 'org.freedesktop.ScreenSaver'
+
+# allow firefox stuff (FIXME: find a way to mount only app-owned files with it still working)
+arg2 ro-bind '/usr/bin'
+arg2 ro-bind '/usr/lib'
+
+arg2 ro-bind '/usr/share/applications/firefox.desktop'
+find '/usr/share/icons/hicolor' | grep '/firefox' | while IFS= read -r file; do
+  arg2 ro-bind "${file}"
+done
+dbus-user.own 'org.mozilla.Firefox.*'
+dbus-user.own 'org.mozilla.firefox.*'
+dbus-user.own 'org.mpris.MediaPlayer2.firefox.*'

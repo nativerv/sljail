@@ -1,0 +1,15 @@
+# shellcheck shell=bash
+# vim:ft=bash
+
+arg2 ro-bind-try '/usr/share/icu'
+arg2 ro-bind-try '/usr/share/drirc.d'
+arg2 ro-bind-try '/usr/share/fonts'
+arg2 ro-bind-try '/usr/share/fontconfig'
+arg2 ro-bind-try '/usr/share/glib-2.0'
+arg2 ro-bind-try '/usr/share/glvnd'
+arg2 ro-bind-try '/usr/share/libdrm'
+arg2 ro-bind-try '/usr/share/icons'
+arg2 ro-bind-try '/usr/share/mime'
+arg2 ro-bind-try '/usr/share/X11/xkb'
+arg2 ro-bind-try '/usr/share/icons'
+arg2 ro-bind-try '/usr/share/mime'

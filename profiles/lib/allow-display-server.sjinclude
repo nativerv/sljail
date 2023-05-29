@@ -1,0 +1,25 @@
+# shellcheck shell=bash
+# vim:ft=bash
+
+PROFILE_SELF_NAME="$(basename "${BASH_SOURCE[0]}")"
+: "${SANDBOX_XAUTHORITY:="${SANDBOX_XDG_RUNTIME_DIR}/xauthority"}"
+
+case "${XDG_SESSION_TYPE}" in
+  X11)
+    arg2 bind "/tmp/.X11-unix/X${DISPLAY#:}"
+    arg setenv 'XAUTHORITY' "${SANDBOX_XAUTHORITY}"
+    arg setenv 'DISPLAY' "${DISPLAY}"
+    arg ro-bind "${XAUTHORITY}" "${SANDBOX_XAUTHORITY}"
+    # WARNING: maybe the following is needed?
+    #arg bind-try '/tmp/.ICE-unix' 
+    ;;
+  wayland)
+    arg ro-bind-try "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" "${SANDBOX_XDG_RUNTIME_DIR}/${WAYNALD_DISPLAY}"
+    arg setenv 'WAYLAND_DISPLAY' "${WAYLAND_DISPLAY}"
+    arg setenv 'MOZ_ENABLE_WAYLAND' 1
+    ;;
+  *)
+    say "${PROFILE_SELF_NAME}: please set XDG_SESSION_TYPE environment variable so the profile can decide which display server to whitelist." &&
+      exit 1
+    ;;
+esac

@@ -1,0 +1,26 @@
+# shellcheck shell=bash
+# vim:ft=bash
+
+arg dir '/usr' &&
+  arg dir '/usr/local' &&
+  arg dir '/usr/lib' &&
+  arg symlink '/usr/lib' '/usr/lib64' &&
+  arg dir '/usr/include'
+  arg dir '/usr/bin' &&
+  arg dir '/usr/sbin' &&
+  arg dir '/usr/share'
+arg symlink '/usr/lib' '/lib'
+arg symlink '/usr/lib64' '/lib64'
+arg symlink '/usr/bin' '/bin'
+arg symlink '/usr/bin' '/sbin'
+arg dir '/var' &&
+  arg dir '/var/empty'
+arg dir '/run' &&
+  arg dir '/run/user' &&
+  arg symlink '/run' '/var/run'
+arg perms 700 && arg dir "${SANDBOX_XDG_RUNTIME_DIR}"
+arg dev '/dev'
+arg proc '/proc'
+SLJAIL_INSTANCE_TMP="/tmp/sljail/${SLJAIL_INSTANCE_NAME}"
+mkdir -p "${SLJAIL_INSTANCE_TMP}" &&
+  arg bind "${SLJAIL_INSTANCE_TMP}" '/tmp'
