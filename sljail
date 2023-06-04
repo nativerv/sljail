@@ -20,7 +20,6 @@ SLJAIL_SELF_NAME="$(basename "${0}")"
 : "${SLJAIL_PATH:="${SLJAIL_CONFIG_HOME}:/usr/share/sljail"}"
 SLJAIL_GCC_ARGS=(-Wall -Wextra -lseccomp)
 SLJAIL_SELF_PID="${$}"
-trap 'exit 1' USR1
 
 # sljail instance environment
 SLJAIL_INSTANCE_NAME=
@@ -54,7 +53,12 @@ usage() {
   printf >&2 '  --name         Specify instance name\n'
 }
 
+### *** BEGIN PUBLIC FUNCTIONS ***
+
 # resolve a file from SLJAIL_PATH by name or use path to file
+# example:
+#   seccomp "$(sjfile "seccomp/default.c")"
+#   source "$(sjfile "profiles/lib/allow-display-server.sjinclude")"
 sjfile() {
   [ -f "${1}" ] && printf '%s' "${1}" && return
   for dir in $(printf '%s' "${SLJAIL_PATH}" | tr ':' '\n') ; do
@@ -263,6 +267,8 @@ seccomp() {
   arg seccomp "${fd}"
 }
 
+### *** END PUBLIC FUNCTIONS ***
+
 # set the name of this instance. will influence things like it's runtime dir and state dir (home jail), etc.
 # shellcheck disable=2034
 name() {
@@ -272,120 +278,122 @@ name() {
   SLJAIL_INSTANCE_RUNTIME_DIR="${SLJAIL_RUNTIME_DIR}/${SLJAIL_INSTANCE_NAME}"
 }
 
-# parse arguments
-profile=
-while :; do
-  case "${1-}" in
-    -h | -\? | --help) # call a "usage" function to display a synopsis, then exit.
-      usage
-      exit
-      ;;
-    -p | --profile) # get profile file and continue.
-      profile="$(sjfile "${2-}")"
-      shift
-      [ -z "${profile}" ] && say 'ERROR: `--profile` requires a non-empty option argument.' && exit 1
-      ;;
-    -n | --name)
-      [ -z "${2-}" ] && say 'ERROR: `--name` requires a non-empty option argument.' && exit 1
-      name "${2-}"
-      shift
-      ;;
-    --) # break option parsing, treat everything as positional arguments after it.
-      shift
-      break
-      ;;
-    -?*) # unknown option
-      say "ERROR: unknown option: ${1}"
-      ;;
-    *) # default case: if no more options then break out of the loop.
-      break ;;
-  esac
-  shift
-done
+main() {
+  trap 'exit 1' USR1
 
-# validate arguments
-[ -z "${profile}" ] && say 'ERROR: `--profile` is required.' && exit 1
-[ -z "${SLJAIL_INSTANCE_NAME}" ] && say 'ERROR: sljail instance is required to have a name. Either pass it through the `--name` argument, or specify it in the profile with the `name` command.' && exit 1
+  # parse arguments
+  profile=
+  while :; do
+    case "${1-}" in
+      -h | -\? | --help) # call a "usage" function to display a synopsis, then exit.
+        usage
+        exit
+        ;;
+      -p | --profile) # get profile file and continue.
+        profile="$(sjfile "${2-}")"
+        shift
+        [ -z "${profile}" ] && say 'ERROR: `--profile` requires a non-empty option argument.' && exit 1
+        ;;
+      -n | --name)
+        [ -z "${2-}" ] && say 'ERROR: `--name` requires a non-empty option argument.' && exit 1
+        name "${2-}"
+        shift
+        ;;
+      --) # break option parsing, treat everything as positional arguments after it.
+        shift
+        break
+        ;;
+      -?*) # unknown option
+        say "ERROR: unknown option: ${1}"
+        ;;
+      *) # default case: if no more options then break out of the loop.
+        break ;;
+    esac
+    shift
+  done
 
-# initialize args arrays
-bwrap_args=()
-dbus_system_args=()
-dbus_user_args=()
+  # validate arguments
+  [ -z "${profile}" ] && say 'ERROR: `--profile` is required.' && exit 1
+  [ -z "${SLJAIL_INSTANCE_NAME}" ] && say 'ERROR: sljail instance is required to have a name. Either pass it through the `--name` argument, or specify it in the profile with the `name` command.' && exit 1
 
-################################################################################
+  # initialize args arrays
+  bwrap_args=()
+  dbus_system_args=()
+  dbus_user_args=()
 
-# source the profile
-# shellcheck disable=1090
-source "${profile}"
+  # source the profile
+  # shellcheck disable=1090
+  source "${profile}"
 
-################################################################################
+  # positional arguments
+  [ -z "${1-}" ] && say 'ERROR: `COMMAND` is required' && usage && exit 1
+  program="${1}" && shift
 
-# positional arguments
-[ -z "${1-}" ] && say 'ERROR: `COMMAND` is required' && usage && exit 1
-program="${1}" && shift
+  # start xdg dbus proxy if enabled
+  if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_dbus_user-}" = true ]; }; then
+    # setup args for xdg dbus proxy
+    pipe="$(mktemp -u)"
+    mkfifo "${pipe}"
+    exec {xdg_dbus_proxy_fd}<>"${pipe}"
+    rm "${pipe}"
+    xdg_dbus_proxy_args=(
+      --fd="${xdg_dbus_proxy_fd}"
+    )
+    [ "${enable_dbus_system}" = true ] && xdg_dbus_proxy_args+=(
+      'unix:path=/run/dbus/system_bus_socket'
+      "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
+      --filter "${dbus_system_args[@]}"
+    )
+    [ "${enable_dbus_user}" = true ] && xdg_dbus_proxy_args+=(
+      "${DBUS_SESSION_BUS_ADDRESS}"
+      "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
+      --filter "${dbus_user_args[@]}"
+    )
 
-# start xdg dbus proxy if enabled
-if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_dbus_user-}" = true ]; }; then
-  # setup args for xdg dbus proxy
-  pipe="$(mktemp -u)"
-  mkfifo "${pipe}"
-  exec {xdg_dbus_proxy_fd}<>"${pipe}"
-  rm "${pipe}"
-  xdg_dbus_proxy_args=(
-    --fd="${xdg_dbus_proxy_fd}"
-  )
-  [ "${enable_dbus_system}" = true ] && xdg_dbus_proxy_args+=(
-    'unix:path=/run/dbus/system_bus_socket'
-    "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_system_proxy"
-    --filter "${dbus_system_args[@]}"
-  )
-  [ "${enable_dbus_user}" = true ] && xdg_dbus_proxy_args+=(
-    "${DBUS_SESSION_BUS_ADDRESS}"
-    "${SLJAIL_INSTANCE_RUNTIME_DIR}/dbus_session_proxy"
-    --filter "${dbus_user_args[@]}"
-  )
+    mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}"
+    xdg-dbus-proxy "${xdg_dbus_proxy_args[@]}" &
+    xdg_dbus_proxy_pid="${!}"
+    cleanup_sljail_runtime_dir() { kill "${xdg_dbus_proxy_pid}"; }
 
-  mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}"
-  xdg-dbus-proxy "${xdg_dbus_proxy_args[@]}" &
-  xdg_dbus_proxy_pid="${!}"
-  cleanup_sljail_runtime_dir() { kill "${xdg_dbus_proxy_pid}"; }
+    # wait for proxies
+    read -N 1 -r -u "${xdg_dbus_proxy_fd}" _
+  fi
 
-  # wait for proxies
-  read -N 1 -r -u "${xdg_dbus_proxy_fd}" _
-fi
+  # debug mode: only print args and exit
+  if [ -n "${DEBUG-}" ]; then
+    # shellcheck disable=2001
+    echo "${bwrap_args[@]}" | sed 's/--/\n--/g' >&2
+    echo "${program}" "${@}" >&2
+  fi
 
-# debug mode: only print args and exit
-if [ -n "${DEBUG-}" ]; then
-  # shellcheck disable=2001
-  echo "${bwrap_args[@]}" | sed 's/--/\n--/g' >&2
-  echo "${program}" "${@}" >&2
-fi
+  # DANGER: rm -rf of dynamic value. nothing bad happens, right?
+  # shellcheck disable=2064
+  cleanup_xdg_dbus_proxy() { rm -rf "${SLJAIL_INSTANCE_RUNTIME_DIR}"; }
 
-# DANGER: rm -rf of dynamic value. nothing bad happens, right?
-# shellcheck disable=2064
-cleanup_xdg_dbus_proxy() { rm -rf "${SLJAIL_INSTANCE_RUNTIME_DIR}"; }
+  # can have only one trap for each signal, so:
+  exit_traps() {
+    cleanup_xdg_dbus_proxy
+    cleanup_sljail_runtime_dir
+  }
+  trap exit_traps EXIT TERM HUP
 
-# can have only one trap for each signal, so:
-exit_traps() {
-  cleanup_xdg_dbus_proxy
-  cleanup_sljail_runtime_dir
+  # start with slirp4netns if enabled
+  if [ "${enable_slirp4netns-}" = true ]; then
+    rootlesskit 2>&1 \
+      --net='slirp4netns' \
+      --disable-host-loopback \
+      --slirp4netns-sandbox true \
+      --slirp4netns-seccomp true \
+      --mtu 65520 \
+      --cidr '10.0.2.0/24' \
+      --copy-up='/etc' \
+        bwrap "${bwrap_args[@]}" -- "${program}" "${@}"  |
+      grep -v '\[rootlesskit:'
+    exit
+  fi
+
+  # or start normally
+  bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
 }
-trap exit_traps EXIT TERM HUP
 
-# start with slirp4netns if enabled
-if [ "${enable_slirp4netns-}" = true ]; then
-  rootlesskit 2>&1 \
-    --net='slirp4netns' \
-    --disable-host-loopback \
-    --slirp4netns-sandbox true \
-    --slirp4netns-seccomp true \
-    --mtu 65520 \
-    --cidr '10.0.2.0/24' \
-    --copy-up='/etc' \
-      bwrap "${bwrap_args[@]}" -- "${program}" "${@}"  |
-    grep -v '\[rootlesskit:'
-  exit
-fi
-
-# or start normally
-bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
+[ "${BASH_SOURCE[0]}" == "$0" ] && main "${@}"
