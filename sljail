@@ -347,8 +347,7 @@ if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_db
   mkdir -p "${SLJAIL_INSTANCE_RUNTIME_DIR}"
   xdg-dbus-proxy "${xdg_dbus_proxy_args[@]}" &
   xdg_dbus_proxy_pid="${!}"
-  # shellcheck disable=2064
-  trap "kill ${xdg_dbus_proxy_pid}" EXIT TERM HUP
+  cleanup_sljail_runtime_dir() { kill "${xdg_dbus_proxy_pid}"; }
 
   # wait for proxies
   read -N 1 -r -u "${xdg_dbus_proxy_fd}" _
@@ -363,7 +362,14 @@ fi
 
 # DANGER: rm -rf of dynamic value. nothing bad happens, right?
 # shellcheck disable=2064
-trap "rm -rf '${SLJAIL_INSTANCE_RUNTIME_DIR}'" EXIT TERM HUP
+cleanup_xdg_dbus_proxy() { rm -rf "${SLJAIL_INSTANCE_RUNTIME_DIR}"; }
+
+# can have only one trap for each signal, so:
+exit_traps() {
+  cleanup_xdg_dbus_proxy
+  cleanup_sljail_runtime_dir
+}
+trap exit_traps EXIT TERM HUP
 
 # start with slirp4netns if enabled
 if [ "${enable_slirp4netns-}" = true ]; then
