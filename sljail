@@ -100,13 +100,20 @@ user() {
   arg chdir "/home/${SANDBOX_USER}"
 }
 
+# bind procedurally generated data to a file inside of the sandbox
+# example:
+#   bind-data '/etc/resolv.conf' 'nameserver 10.0.2.3'
+bind-data() {
+  exec {fd}< <(printf '%s' "${2}")
+  arg bind-data "${fd}" "${1}"
+}
+
 # spoof machine-id
 # argument should be 32-digit lowercase hex number
 # if no arguments supplied, random id is generated for you
 machine-id() {
   local machine_id="${1:-"$(tr -dc '[:digit:]abcdef' <'/dev/urandom'  | head -c 32)"}"
-  exec {fd}< <(printf '%s\x0a' "${machine_id}")
-  arg bind-data "${fd}" '/etc/machine-id'
+  bind-data '/etc/machine-id' "$(printf '%s\x0a' "${machine_id}")"
   arg symlink '/etc/machine-id' '/var/lib/dbus/machine-id'
 }
 
@@ -119,8 +126,7 @@ ${SANDBOX_USER}:x:${SANDBOX_UID}:${SANDBOX_GID}::${SANDBOX_HOME}:/bin/sh
 nobody:x:65534:65534:Nobody:/:/usr/bin/nologin
 EOF
   )"
-  exec {fd}< <(printf '%s' "${passwd}")
-  arg bind-data "${fd}" '/etc/passwd'
+  bind-data '/etc/passwd' "${passwd}"
 }
 
 # spoof /etc/group file
@@ -132,8 +138,7 @@ ${SANDBOX_USER}:x:${SANDBOX_GID}:${SANDBOX_USER}
 nobody:x:65534:
 EOF
   )"
-  exec {fd}< <(printf '%s' "${group}")
-  arg bind-data "${fd}" '/etc/group'
+  bind-data '/etc/group' "${group}"
 }
 
 # set localtime
@@ -149,8 +154,7 @@ localtime() {
 #   hostname 'sandboxed-pc'
 hostname() {
   SANDBOX_HOSTNAME="${1}"
-  exec {fd}< <(printf '%s' "${SANDBOX_HOSTNAME}")
-  arg bind-data "${fd}" '/etc/hostname'
+  bind-data '/etc/hostname' "${SANDBOX_HOSTNAME}"
 }
 
 # spoof /etc/hosts file
@@ -162,19 +166,17 @@ hosts() {
 127.0.0.1	${SANDBOX_HOSTNAME}.localdomain	${SANDBOX_HOSTNAME}
 EOF
   )"
-  exec {fd}< <(printf '%s' "${hosts}")
-  arg bind-data "${fd}" '/etc/hosts'
+  bind-data '/etc/hosts' "${hosts}"
 }
 
 # spoof /etc/host.conf file
 host.conf() {
   local host_conf="$(
-                     cat <<EOF
+    cat <<EOF
 multi on
 EOF
   )"
-  exec {fd}< <(printf '%s' "${host_conf}")
-  arg bind-data "${fd}" '/etc/host.conf'
+  bind-data '/etc/host.conf' "${host_conf}"
 }
 
 # spoof /etc/nsswitch.conf file
@@ -198,8 +200,7 @@ rpc: files
 netgroup: files
 EOF
   )"
-  exec {fd}< <(printf '%s' "${nsswitch_conf}")
-  arg bind-data "${fd}" '/etc/nsswitch.conf'
+  bind-data '/etc/nsswitch.conf' "${nsswitch_conf}"
 }
 
 dbus-system() {
@@ -216,7 +217,7 @@ dbus-user() {
 
 # add a xdg-dbus-proxy policy as per it's manpage.
 # example:
-#  dbus-user.talk "org.freedesktop.Notifications"
+#   dbus-user.talk "org.freedesktop.Notifications"
 dbus-user.own() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
 dbus-user.talk() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
 dbus-user.see() { [ "${enable_dbus_user-}" != true ] && say "ERROR: you can't have dbus-user rules without dbus-user enabled" && exit 1; dbus_user_args+=("--${FUNCNAME#*.}=${1}"); }
