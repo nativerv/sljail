@@ -104,7 +104,7 @@ user() {
 # argument should be 32-digit lowercase hex number
 # if no arguments supplied, random id is generated for you
 machine-id() {
-  local machine_id="${arg:-"$(tr -dc '[:digit:]abcdef' <'/dev/urandom'  | head -c 32)"}"
+  local machine_id="${1:-"$(tr -dc '[:digit:]abcdef' <'/dev/urandom'  | head -c 32)"}"
   exec {fd}< <(printf '%s\x0a' "${machine_id}")
   arg bind-data "${fd}" '/etc/machine-id'
   arg symlink '/etc/machine-id' '/var/lib/dbus/machine-id'
