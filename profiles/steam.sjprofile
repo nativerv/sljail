@@ -16,6 +16,7 @@ arg unshare-all
 arg share-net
 # new process session, which counters TIOCSTI (CVE-2023-28100) escape, just in case despite seccomp rules below block it
 arg new-session
+slirp4netns
 
 # make the FHS
 source "$(sjfile "profiles/lib/fhs.sjinclude")"

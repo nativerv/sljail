@@ -231,6 +231,13 @@ dbus-system.call() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can
 dbus-system.broadcast() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=("--${FUNCNAME#*.}=${1}"); }
 dbus-system.log() { [ "${enable_dbus_system-}" != true ] && say "ERROR: you can't have dbus-system rules without dbus-system enabled" && exit 1; dbus_system_args+=(--log); }
 
+# enable private networking stack
+# requires 'slirp4netns' and 'rootlesskit' binaries present in PATH.
+# NOTE/FIXME: this also has a sideeffect of piping stderr of the program to stdout
+slirp4netns() {
+  enable_slirp4netns=true
+}
+
 # use precompiled bpf file as a seccomp-bpf filter of the sandbox
 seccomp-precompiled() {
   exec {fd}<"${1}"
@@ -316,7 +323,7 @@ source "${profile}"
 [ -z "${1-}" ] && say 'ERROR: `COMMAND` is required' && usage && exit 1
 program="${1}" && shift
 
-# start xdg dbus proxy
+# start xdg dbus proxy if enabled
 if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_dbus_user-}" = true ]; }; then
   # setup args for xdg dbus proxy
   pipe="$(mktemp -u)"
@@ -347,14 +354,31 @@ if [ -z "${DEBUG-}" ] && { [ "${enable_dbus_system-}" = true ] || [ "${enable_db
   read -N 1 -r -u "${xdg_dbus_proxy_fd}" _
 fi
 
-# execute bwrap with the arguments or print arguments if DEBUG
-if [ -z "${DEBUG-}" ]; then
-  # DANGER: rm -rf of dynamic value. nothing bad happens, right?
-  # shellcheck disable=2064
-  trap "rm -rf '${SLJAIL_INSTANCE_RUNTIME_DIR}'" EXIT TERM HUP
-  bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
-else
+# debug mode: only print args and exit
+if [ -n "${DEBUG-}" ]; then
   # shellcheck disable=2001
   echo "${bwrap_args[@]}" | sed 's/--/\n--/g' >&2
   echo "${program}" "${@}" >&2
 fi
+
+# DANGER: rm -rf of dynamic value. nothing bad happens, right?
+# shellcheck disable=2064
+trap "rm -rf '${SLJAIL_INSTANCE_RUNTIME_DIR}'" EXIT TERM HUP
+
+# start with slirp4netns if enabled
+if [ "${enable_slirp4netns-}" = true ]; then
+  rootlesskit 2>&1 \
+    --net='slirp4netns' \
+    --disable-host-loopback \
+    --slirp4netns-sandbox true \
+    --slirp4netns-seccomp true \
+    --mtu 65520 \
+    --cidr '10.0.2.0/24' \
+    --copy-up='/etc' \
+      bwrap "${bwrap_args[@]}" -- "${program}" "${@}"  |
+    grep -v '\[rootlesskit:'
+  exit
+fi
+
+# or start normally
+bwrap "${bwrap_args[@]}" -- "${program}" "${@}"
